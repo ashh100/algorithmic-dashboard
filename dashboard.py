@@ -8,10 +8,10 @@ import requests
 import xml.etree.ElementTree as ET
 
 # 1. Page Setup
-st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal V2.0")
-st.title("⚡ Ashwath's Algorithmic Terminal V2.0")
+st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
+st.title("⚡ Ashwath's Market Terminal")
 
-# --- SESSION STATE INITIALIZATION ---
+# --- SESSION STATE ---
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS']
 if 'show_ai' not in st.session_state:
@@ -32,86 +32,12 @@ def run_ai_analysis():
 def go_back():
     st.session_state.show_ai = False
 
-# --- PATTERN RECOGNITION (Custom Implementation) ---
-def identify_patterns(df):
-    # Doji: Open and Close are very close
-    df['Doji'] = abs(df['Open'] - df['Close']) <= (df['High'] - df['Low']) * 0.1
-    # Hammer: Small body, long lower wick, short upper wick
-    body = abs(df['Open'] - df['Close'])
-    lower_wick = df[['Open', 'Close']].min(axis=1) - df['Low']
-    upper_wick = df['High'] - df[['Open', 'Close']].max(axis=1)
-    df['Hammer'] = (lower_wick > 2 * body) & (upper_wick < body)
-    return df
-
-# --- BACKTESTING ENGINE (Vectorized) ---
-def run_backtest(df, fast_ma, slow_ma, initial_capital=100000):
-    df['Fast_MA'] = df['Close'].rolling(window=fast_ma).mean()
-    df['Slow_MA'] = df['Close'].rolling(window=slow_ma).mean()
-    
-    # Logic: Buy when Fast crosses above Slow, Sell when Fast crosses below Slow
-    df['Signal'] = 0
-    df['Signal'][fast_ma:] = np.where(df['Fast_MA'][fast_ma:] > df['Slow_MA'][fast_ma:], 1, 0)
-    df['Position'] = df['Signal'].diff()
-    
-    # Calculate Returns
-    df['Market_Returns'] = df['Close'].pct_change()
-    df['Strategy_Returns'] = df['Market_Returns'] * df['Signal'].shift(1)
-    
-    df['Portfolio_Value'] = initial_capital * (1 + df['Strategy_Returns']).cumprod()
-    
-    total_return = df['Portfolio_Value'].iloc[-1] - initial_capital
-    return df, total_return
-
-# --- EXISTING ANALYTICS FUNCTIONS ---
-def search_tickers(query):
-    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10&newsCount=0"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    try:
-        response = requests.get(url, headers=headers)
-        data = response.json()
-        search_results = {}
-        if 'quotes' in data:
-            for quote in data['quotes']:
-                if 'shortname' in quote and 'symbol' in quote:
-                    label = f"{quote['symbol']} - {quote['shortname']}"
-                    search_results[label] = quote['symbol']
-        return search_results
-    except:
-        return {}
-
-def is_support(df, i, n):
-    for k in range(1, n+1):
-        if i-k < 0 or i+k >= len(df): continue
-        if df['Low'][i] >= df['Low'][i-k] or df['Low'][i] >= df['Low'][i+k]:
-            return False
-    return True
-
-def is_resistance(df, i, n):
-    for k in range(1, n+1): 
-        if i-k < 0 or i+k >= len(df): continue
-        if df['High'][i] <= df['High'][i-k] or df['High'][i] <= df['High'][i+k]:
-            return False
-    return True
-
 def calculate_rsi(data, window=14):
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
-
-def count_levels(df, n, current_price):
-    levels = []
-    for i in range(n, df.shape[0]-n):
-        if is_support(df, i, n):
-            l = df['Low'][i]
-            if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
-                levels.append(l)
-        elif is_resistance(df, i, n):
-            l = df['High'][i]
-            if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
-                levels.append(l)
-    return len(levels)
 
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
@@ -145,7 +71,7 @@ def get_ai_analysis(ticker, data, news_list):
         if "GROQ_API_KEY" in st.secrets:
             api_key = st.secrets["GROQ_API_KEY"]
         else:
-            return "⚠️ Error: GROQ_API_KEY missing."
+            return "⚠️ Error: GROQ_API_KEY missing in secrets."
     except:
         return "⚠️ Error: Secrets not loaded."
 
@@ -170,190 +96,140 @@ def get_stock_data(ticker, period):
     df = stock.history(period=period)
     if df.empty: return df
     
+    # Basic Indicators
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    df['Pct_Change'] = df['Close'].pct_change()
-    df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
-    
-    # MACD
-    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
-    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD'] = df['EMA_12'] - df['EMA_26']
-    df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    
-    # Bollinger Bands
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['STD_20'] = df['Close'].rolling(window=20).std()
-    df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
-    df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
-    
-    # RSI
     df['RSI'] = calculate_rsi(df['Close'])
-
-    # Patterns
-    df = identify_patterns(df)
+    df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
+    df['Signal_Line'] = df['MACD'].ewm(span=9).mean()
     
     return df
 
-@st.cache_data(ttl=3600)
-def get_sector_correlation(ticker, period="1y"):
-    # Compare with Nifty 50 (NSEI)
-    try:
-        tickers = [ticker, "^NSEI"]
-        data = yf.download(tickers, period=period)['Close']
-        correlation = data.corr().iloc[0, 1]
-        return correlation, data
-    except:
-        return 0, None
+# --- SIDEBAR ---
+st.sidebar.header("📁 Watchlist")
 
-# --- SIDEBAR: WATCHLIST & SEARCH ---
-st.sidebar.header("🔍 Watchlist & Search")
-
-# Watchlist Display
-st.sidebar.subheader("My Portfolio")
+# 1. Watchlist Buttons
 for stock in st.session_state.watchlist:
     col1, col2 = st.sidebar.columns([0.8, 0.2])
-    if col1.button(stock, key=stock):
+    # Clicking the name sets the ticker
+    if col1.button(stock, key=stock, use_container_width=True):
         st.session_state.selected_ticker = stock
+    # Clicking X removes it
     if col2.button("✖", key=f"del_{stock}"):
         remove_from_watchlist(stock)
         st.rerun()
 
-# Search Input
-search_query = st.sidebar.text_input("Add Stock", placeholder="e.g. Tata Motors")
-if st.sidebar.button("Add to Watchlist"):
-    results = search_tickers(search_query)
-    if results:
-        top_result = list(results.values())[0]
-        add_to_watchlist(top_result)
-        st.sidebar.success(f"Added {top_result}")
-        st.rerun()
-
-# Main Ticker Selection Logic
-if 'selected_ticker' in st.session_state:
-    ticker = st.session_state.selected_ticker
-else:
-    ticker = "RELIANCE.NS" # Default
-
 st.sidebar.markdown("---")
+new_ticker = st.sidebar.text_input("Add Ticker", placeholder="e.g. TATAMOTORS.NS")
+if st.sidebar.button("Add to List"):
+    add_to_watchlist(new_ticker.upper())
+    st.rerun()
+
+# 2. Settings
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Settings")
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
-chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area"])
+chart_style = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line"])
 
-# --- MAIN DASHBOARD LOGIC ---
-if ticker:
-    st.header(f"Analysis: {ticker}")
-    df = get_stock_data(ticker, period) 
+# --- MAIN PAGE LOGIC ---
+if 'selected_ticker' not in st.session_state:
+    st.session_state.selected_ticker = "RELIANCE.NS"
+
+ticker = st.session_state.selected_ticker
+
+# Fetch Data
+df = get_stock_data(ticker, period)
+
+if not df.empty:
+    current_price = df['Close'].iloc[-1]
+    prev_close = df['Close'].iloc[-2]
+    change = ((current_price - prev_close)/prev_close)*100
     
-    if not df.empty:
-        # Filter Volume
-        if not df[df['Volume'] > 0].empty: df = df[df['Volume'] > 0]
-        current_price = df['Close'].iloc[-1]
-        
-        # --- TOP METRICS & ALERTS PANEL ---
-        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-        
-        # Metrics
-        col_m1.metric("Price", f"₹{current_price:.2f}", f"{df['Pct_Change'].iloc[-1]*100:.2f}%")
-        col_m2.metric("RSI (14)", f"{df['RSI'].iloc[-1]:.1f}")
-        
-        # Sector Correlation
-        corr, corr_data = get_sector_correlation(ticker)
-        col_m3.metric("Nifty Corr.", f"{corr:.2f}")
-
-        # Live Signals (Logic)
-        signal = "NEUTRAL"
-        color = "off"
-        if df['RSI'].iloc[-1] < 30: 
-            signal = "OVERSOLD (BUY?)"
-            color = "inverse" # Green-ish
-        elif df['RSI'].iloc[-1] > 70: 
-            signal = "OVERBOUGHT (SELL?)"
-            color = "normal" # Red-ish warning
-        
-        col_m4.error(f"Signal: {signal}") if "SELL" in signal else col_m4.success(f"Signal: {signal}") if "BUY" in signal else col_m4.info("Signal: NEUTRAL")
-
-        # --- AI & BACK BUTTON ---
-        if st.sidebar.button("🤖 AI Analysis"):
-            run_ai_analysis()
-            
-        if st.session_state.show_ai:
-            if st.button("← Back to Charts"):
-                go_back()
-                st.rerun()
-            with st.spinner("AI analyzing..."):
-                news = get_stock_news(ticker)
-                analysis = get_ai_analysis(ticker, df, news)
-                st.info(analysis)
-
-        # --- TABS FOR ANALYSIS ---
-        tab_chart, tab_tech, tab_backtest = st.tabs(["📈 Pro Chart", "📊 Indicators", "🛠 Strategy Tester"])
-
-        # 1. MAIN CHART
-        with tab_chart:
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
-            
-            # Price Trace
-            if chart_type == "Candlestick":
-                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-            else:
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Price"), row=1, col=1)
-
-            # Patterns (Markers)
-            doji_dates = df[df['Doji']].index
-            if len(doji_dates) > 0:
-                fig.add_trace(go.Scatter(x=doji_dates, y=df.loc[doji_dates]['High'], mode='markers', marker=dict(symbol='diamond', size=5, color='yellow'), name="Doji"), row=1, col=1)
-            
-            hammer_dates = df[df['Hammer']].index
-            if len(hammer_dates) > 0:
-                fig.add_trace(go.Scatter(x=hammer_dates, y=df.loc[hammer_dates]['Low'], mode='markers', marker=dict(symbol='triangle-up', size=8, color='purple'), name="Hammer"), row=1, col=1)
-
-            # Volume
-            colors = ['green' if o-c <= 0 else 'red' for o, c in zip(df['Open'], df['Close'])]
-            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
-            
-            fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
-
-        # 2. INDICATORS TAB
-        with tab_tech:
-            st.subheader("Deep Dive Indicators")
-            fig2 = make_subplots(rows=3, cols=1, shared_xaxes=True)
-            
-            # RSI
-            fig2.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='purple')), row=1, col=1)
-            fig2.add_hline(y=70, row=1, col=1, line_dash="dash", line_color="red")
-            fig2.add_hline(y=30, row=1, col=1, line_dash="dash", line_color="green")
-            
-            # MACD
-            fig2.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD"), row=2, col=1)
-            fig2.add_trace(go.Scatter(x=df.index, y=df['Signal_Line'], name="Signal"), row=2, col=1)
-            fig2.add_trace(go.Bar(x=df.index, y=df['MACD']-df['Signal_Line'], name="Hist"), row=2, col=1)
-            
-            # Volatility
-            fig2.add_trace(go.Scatter(x=df.index, y=df['Volatility'], name="Volatility", line=dict(color='orange')), row=3, col=1)
-            
-            fig2.update_layout(height=800, template="plotly_dark")
-            st.plotly_chart(fig2, use_container_width=True)
-
-        # 3. BACKTEST TAB
-        with tab_backtest:
-            st.subheader("Strategy Lab: SMA Crossover")
-            col_b1, col_b2 = st.columns(2)
-            fast_ma = col_b1.number_input("Fast MA", 5, 50, 20)
-            slow_ma = col_b2.number_input("Slow MA", 20, 200, 50)
-            
-            if st.button("Run Backtest"):
-                res_df, total_ret = run_backtest(df.copy(), fast_ma, slow_ma)
-                
-                st.metric("Total Return", f"₹{total_ret:.2f}", f"{(total_ret/100000)*100:.1f}%")
-                
-                # Plot Equity Curve
-                fig_bt = go.Figure()
-                fig_bt.add_trace(go.Scatter(x=res_df.index, y=res_df['Portfolio_Value'], fill='tozeroy', name="Portfolio Value"))
-                fig_bt.update_layout(title="Equity Curve", template="plotly_dark")
-                st.plotly_chart(fig_bt, use_container_width=True)
-
+    # --- HEADER SECTION (Clean Metrics) ---
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric(label=ticker, value=f"₹{current_price:.2f}", delta=f"{change:.2f}%")
+    col2.metric("RSI (14)", f"{df['RSI'].iloc[-1]:.1f}")
+    col3.metric("Volume", f"{df['Volume'].iloc[-1]/1e6:.2f}M")
+    
+    # Signal Box (Fixed logic)
+    rsi_val = df['RSI'].iloc[-1]
+    if rsi_val < 30:
+        col4.success("Signal: OVERSOLD (Buy?)")
+    elif rsi_val > 70:
+        col4.error("Signal: OVERBOUGHT (Sell?)")
     else:
-        st.error("Could not load data for this ticker.")
+        col4.info("Signal: NEUTRAL")
+
+    # --- AI SECTION (Expandable) ---
+    st.markdown("---")
+    # Toggle button
+    if st.button(f"🤖 Ask AI Analyst about {ticker}"):
+        run_ai_analysis()
+    
+    if st.session_state.show_ai:
+        if st.button("✖ Close Report"):
+            go_back()
+            st.rerun()
+            
+        with st.container():
+            st.info("Generating analysis...")
+            news = get_stock_news(ticker)
+            analysis = get_ai_analysis(ticker, df, news)
+            st.success(f"**AI Report:**\n\n{analysis}")
+
+    # --- TABS (Organized Views) ---
+    st.markdown("### Market Data")
+    tab1, tab2 = st.tabs(["📈 Price Chart", "🛠 Strategy Tester"])
+    
+    with tab1:
+        # Simple, Clean Chart
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.1)
+        
+        if chart_style == "Candlestick":
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+        else:
+            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', name="Price"), row=1, col=1)
+            
+        # Add EMA
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='orange', width=1), name="EMA 20"), row=1, col=1)
+        
+        # Volume
+        colors = ['red' if row['Open'] - row['Close'] > 0 else 'green' for i, row in df.iterrows()]
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name="Volume"), row=2, col=1)
+        
+        fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        st.write("### Simple Moving Average Strategy")
+        c1, c2 = st.columns(2)
+        short_window = c1.number_input("Short Window", 10, 50, 20)
+        long_window = c2.number_input("Long Window", 50, 200, 50)
+        
+        if st.button("Run Backtest"):
+            # Simple vector backtest
+            signals = pd.DataFrame(index=df.index)
+            signals['signal'] = 0.0
+            signals['short_mavg'] = df['Close'].rolling(window=short_window, min_periods=1, center=False).mean()
+            signals['long_mavg'] = df['Close'].rolling(window=long_window, min_periods=1, center=False).mean()
+            signals['signal'][short_window:] = np.where(signals['short_mavg'][short_window:] > signals['long_mavg'][short_window:], 1.0, 0.0)   
+            signals['positions'] = signals['signal'].diff()
+            
+            # Plot
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=df.index, y=df['Close'], name="Price", line=dict(color='gray', width=1)))
+            fig_bt.add_trace(go.Scatter(x=signals.index, y=signals['short_mavg'], name="Short MA", line=dict(color='orange')))
+            fig_bt.add_trace(go.Scatter(x=signals.index, y=signals['long_mavg'], name="Long MA", line=dict(color='blue')))
+            
+            # Buy/Sell markers
+            buy_signals = signals.loc[signals.positions == 1.0]
+            sell_signals = signals.loc[signals.positions == -1.0]
+            
+            fig_bt.add_trace(go.Scatter(x=buy_signals.index, y=df.loc[buy_signals.index]['Close'], mode='markers', marker=dict(symbol='triangle-up', color='green', size=10), name="Buy"))
+            fig_bt.add_trace(go.Scatter(x=sell_signals.index, y=df.loc[sell_signals.index]['Close'], mode='markers', marker=dict(symbol='triangle-down', color='red', size=10), name="Sell"))
+            
+            fig_bt.update_layout(template="plotly_dark", height=500)
+            st.plotly_chart(fig_bt, use_container_width=True)
+
 else:
-    st.info("Select a stock from the Watchlist or Search to begin.")
+    st.error("No data found. Please check the ticker symbol.")
