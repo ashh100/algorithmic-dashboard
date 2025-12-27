@@ -532,7 +532,7 @@ if ticker:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
         # [MODIFIED] Portfolio Tracker Tab with Search Functionality
-    with tab4:
+        with tab4:
             st.subheader("💼 Portfolio Tracker")
             
             with st.expander("Add New Position", expanded=False):
@@ -570,6 +570,13 @@ if ticker:
                             default_price = stock_info.history(period='1d')['Close'].iloc[-1]
                     except:
                         default_price = 0.0
+                    
+                    # [UPDATED FIX] FORCE UPDATE INPUT FIELDS VIA SESSION STATE
+                    # This ensures the input boxes below reflect the searched stock immediately
+                    if 'pf_ticker_input' in st.session_state:
+                         st.session_state.pf_ticker_input = chosen_ticker
+                    if 'pf_price_input' in st.session_state:
+                         st.session_state.pf_price_input = float(default_price)
 
                 st.divider()
 
@@ -578,12 +585,12 @@ if ticker:
                 c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
                 
                 with c1:
-                    val_ticker = chosen_ticker if chosen_ticker else ""
-                    new_ticker = st.text_input("Ticker Symbol", value=val_ticker, key="pf_ticker_input").upper()
+                    # Removed 'value=...' and rely on session_state key for updates
+                    new_ticker = st.text_input("Ticker Symbol", key="pf_ticker_input").upper()
                 with c2:
                     new_qty = st.number_input("Quantity", min_value=1, value=10, key="pf_qty_input")
                 with c3:
-                    new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(default_price), format="%.2f", key="pf_price_input")
+                    new_price = st.number_input("Avg Buy Price", min_value=0.0, format="%.2f", key="pf_price_input")
                 with c4:
                     st.write("") 
                     st.write("")
@@ -594,7 +601,11 @@ if ticker:
                                 "Quantity": new_qty,
                                 "Buy Price": new_price
                             })
-                            st.toast(f"Added {new_ticker} to Portfolio!", icon="✅")
+                            
+                            # [UPDATED FIX] UPDATE DASHBOARD IMMEDIATELY
+                            st.session_state['ticker'] = new_ticker
+                            st.toast(f"Added {new_ticker} to Portfolio & Updated Dashboard!", icon="✅")
+                            st.rerun() # Force app reload to show new data
                         else:
                             st.error("Invalid Ticker")
 
