@@ -76,8 +76,7 @@ def get_stock_news(ticker):
     except:
         return []
 
-# --- NEW: HUGGING FACE AI INTEGRATION ---
-# --- NEW: HUGGING FACE AI INTEGRATION (FIXED & STABLE) ---
+# --- NEW: HUGGING FACE AI INTEGRATION (ROUTER + ZEPHYR FIXED) ---
 def get_ai_analysis(ticker, data, news_list):
     """Calls Hugging Face Inference API for analysis."""
     
@@ -86,9 +85,9 @@ def get_ai_analysis(ticker, data, news_list):
     current_price = data['Close'].iloc[-1]
     news_context = "\n".join(news_list) if news_list else "No recent news available."
     
-    # 2. Define the Model (Switching to v0.2 which is NOT gated)
-    # This URL is the standard, stable free tier endpoint.
-    API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    # 2. Define the Model (Switched to Zephyr - Most Stable/Free)
+    # The 'router' URL + 'hf-inference' path is the required new format
+    API_URL = "https://router.huggingface.co/hf-inference/models/HuggingFaceH4/zephyr-7b-beta"
     
     # 3. Get Token safely
     try:
@@ -98,19 +97,24 @@ def get_ai_analysis(ticker, data, news_list):
 
     headers = {"Authorization": f"Bearer {hf_token}"}
 
-    # 4. Prompt Engineering
+    # 4. Prompt Engineering (Zephyr/Mistral Format)
     prompt = f"""
-    [INST] You are a financial analyst. Analyze {ticker} based on this data:
+    <|system|>
+    You are a senior financial analyst.
+    </s>
+    <|user|>
+    Analyze {ticker} based on this data:
     
     Current Price: {current_price}
-    Recent Data:
+    Recent OHLCV:
     {recent_data}
     
     News:
     {news_context}
     
-    Give a 3-sentence summary: Trend (Bullish/Bearish), Key Reason, and Action (Buy/Sell/Wait).
-    [/INST]
+    Provide a "Trader's Take": Trend (Bullish/Bearish), Analysis, and Action (Buy/Sell/Wait).
+    </s>
+    <|assistant|>
     """
     
     payload = {
@@ -122,13 +126,13 @@ def get_ai_analysis(ticker, data, news_list):
         }
     }
 
-    # 5. Call API with BETTER Error Handling
+    # 5. Call API with Debugging
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         
-        # If the API returns an error (like 404 or 503), show the text
+        # If the API returns an error, show the exact message
         if response.status_code != 200:
-             return f"API Error {response.status_code}: {response.text}"
+             return f"API Status {response.status_code}: {response.text}"
 
         result = response.json()
         
@@ -138,7 +142,7 @@ def get_ai_analysis(ticker, data, news_list):
         elif isinstance(result, dict) and 'generated_text' in result:
              return result['generated_text']
         else:
-             return f"Unexpected format: {result}"
+             return f"Unexpected API response: {result}"
         
     except Exception as e:
         return f"Connection Error: {str(e)}"
