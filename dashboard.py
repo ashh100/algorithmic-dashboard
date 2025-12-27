@@ -8,12 +8,23 @@ import requests
 import xml.etree.ElementTree as ET
 
 # 1. Page Setup
-st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
-st.title("Algorithmic Dashboard")
+st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal V2.0")
+st.title("⚡ Ashwath's Algorithmic Terminal V2.0")
 
-# --- SESSION STATE SETUP (For Back Button) ---
+# --- SESSION STATE INITIALIZATION ---
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS']
 if 'show_ai' not in st.session_state:
     st.session_state.show_ai = False
+
+# --- UTILITY FUNCTIONS ---
+def add_to_watchlist(ticker):
+    if ticker and ticker not in st.session_state.watchlist:
+        st.session_state.watchlist.append(ticker)
+
+def remove_from_watchlist(ticker):
+    if ticker in st.session_state.watchlist:
+        st.session_state.watchlist.remove(ticker)
 
 def run_ai_analysis():
     st.session_state.show_ai = True
@@ -21,7 +32,37 @@ def run_ai_analysis():
 def go_back():
     st.session_state.show_ai = False
 
-# --- UTILITY FUNCTIONS ---
+# --- PATTERN RECOGNITION (Custom Implementation) ---
+def identify_patterns(df):
+    # Doji: Open and Close are very close
+    df['Doji'] = abs(df['Open'] - df['Close']) <= (df['High'] - df['Low']) * 0.1
+    # Hammer: Small body, long lower wick, short upper wick
+    body = abs(df['Open'] - df['Close'])
+    lower_wick = df[['Open', 'Close']].min(axis=1) - df['Low']
+    upper_wick = df['High'] - df[['Open', 'Close']].max(axis=1)
+    df['Hammer'] = (lower_wick > 2 * body) & (upper_wick < body)
+    return df
+
+# --- BACKTESTING ENGINE (Vectorized) ---
+def run_backtest(df, fast_ma, slow_ma, initial_capital=100000):
+    df['Fast_MA'] = df['Close'].rolling(window=fast_ma).mean()
+    df['Slow_MA'] = df['Close'].rolling(window=slow_ma).mean()
+    
+    # Logic: Buy when Fast crosses above Slow, Sell when Fast crosses below Slow
+    df['Signal'] = 0
+    df['Signal'][fast_ma:] = np.where(df['Fast_MA'][fast_ma:] > df['Slow_MA'][fast_ma:], 1, 0)
+    df['Position'] = df['Signal'].diff()
+    
+    # Calculate Returns
+    df['Market_Returns'] = df['Close'].pct_change()
+    df['Strategy_Returns'] = df['Market_Returns'] * df['Signal'].shift(1)
+    
+    df['Portfolio_Value'] = initial_capital * (1 + df['Strategy_Returns']).cumprod()
+    
+    total_return = df['Portfolio_Value'].iloc[-1] - initial_capital
+    return df, total_return
+
+# --- EXISTING ANALYTICS FUNCTIONS ---
 def search_tickers(query):
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10&newsCount=0"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -72,15 +113,12 @@ def count_levels(df, n, current_price):
                 levels.append(l)
     return len(levels)
 
-# --- NEWS FUNCTION ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     try:
         search_term = ticker.split('.')[0] 
         url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         root = ET.fromstring(response.content)
         news_items = []
@@ -92,51 +130,27 @@ def get_stock_news(ticker):
             news_items.append({'title': title, 'link': link, 'publisher': publisher})
         return news_items
     except Exception as e:
-        print(f"News fetch error for {ticker}: {e}")
         return []
 
-# --- AI ANALYST FUNCTION ---
 def get_ai_analysis(ticker, data, news_list):
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
-    if news_list and len(news_list) > 0:
-        formatted_news = []
-        for item in news_list:
-            if isinstance(item, dict):
-                formatted_news.append(f"- {item['title']} (Source: {item['publisher']})")
-            else:
-                formatted_news.append(f"- {item}")
-        news_context = "\n".join(formatted_news)
+    if news_list:
+        formatted_news = "\n".join([f"- {item['title']} ({item['publisher']})" for item in news_list])
     else:
-        news_context = "No recent news available."
-    
-    API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    
+        formatted_news = "No recent news."
+
     try:
         if "GROQ_API_KEY" in st.secrets:
             api_key = st.secrets["GROQ_API_KEY"]
         else:
-            return "⚠️ Error: GROQ_API_KEY missing in .streamlit/secrets.toml"
-    except Exception:
-        return "⚠️ Error: Could not load secrets."
+            return "⚠️ Error: GROQ_API_KEY missing."
+    except:
+        return "⚠️ Error: Secrets not loaded."
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    prompt = f"""
-    You are a Wall Street analyst. Analyze {ticker} based on this data:
-    Price: {current_price}
-    Recent Data: {recent_data}
-    News: {news_context}
-    
-    Provide a "Trader's Take":
-    1. Trend (Bullish/Bearish/Neutral)
-    2. One Key Reason
-    3. Action (Buy/Sell/Wait)
-    """
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    prompt = f"Analyze {ticker}. Price: {current_price}. Data: {recent_data}. News: {formatted_news}. Give Trend, Reason, and Action."
     
     payload = {
         "model": "llama-3.3-70b-versatile",
@@ -145,15 +159,11 @@ def get_ai_analysis(ticker, data, news_list):
     }
 
     try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        if response.status_code != 200:
-             return f"API Error {response.status_code}: {response.text}"
-        result = response.json()
-        return result['choices'][0]['message']['content']
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+        return response.json()['choices'][0]['message']['content']
     except Exception as e:
-        return f"Connection Error: {str(e)}"
+        return f"Error: {str(e)}"
 
-# --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
     stock = yf.Ticker(ticker)
@@ -165,197 +175,185 @@ def get_stock_data(ticker, period):
     df['Pct_Change'] = df['Close'].pct_change()
     df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
     
+    # MACD
     df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
     df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
+    # Bollinger Bands
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['STD_20'] = df['Close'].rolling(window=20).std()
     df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
     df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
     
+    # RSI
+    df['RSI'] = calculate_rsi(df['Close'])
+
+    # Patterns
+    df = identify_patterns(df)
+    
     return df
 
-@st.cache_data(ttl=86400) 
-def get_company_info(ticker):
+@st.cache_data(ttl=3600)
+def get_sector_correlation(ticker, period="1y"):
+    # Compare with Nifty 50 (NSEI)
     try:
-        stock = yf.Ticker(ticker)
-        return stock.info
+        tickers = [ticker, "^NSEI"]
+        data = yf.download(tickers, period=period)['Close']
+        correlation = data.corr().iloc[0, 1]
+        return correlation, data
     except:
-        return None
+        return 0, None
 
-# --- SIDEBAR & CONTROLS ---
-st.sidebar.header("Controls")
-search_query = st.sidebar.text_input("Search Company", "Tata")
+# --- SIDEBAR: WATCHLIST & SEARCH ---
+st.sidebar.header("🔍 Watchlist & Search")
 
-if search_query:
+# Watchlist Display
+st.sidebar.subheader("My Portfolio")
+for stock in st.session_state.watchlist:
+    col1, col2 = st.sidebar.columns([0.8, 0.2])
+    if col1.button(stock, key=stock):
+        st.session_state.selected_ticker = stock
+    if col2.button("✖", key=f"del_{stock}"):
+        remove_from_watchlist(stock)
+        st.rerun()
+
+# Search Input
+search_query = st.sidebar.text_input("Add Stock", placeholder="e.g. Tata Motors")
+if st.sidebar.button("Add to Watchlist"):
     results = search_tickers(search_query)
-    ticker = results[list(results.keys())[0]] if results else None
     if results:
-        selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
-        ticker = results[selected_label]
-    else:
-        st.sidebar.error("No stocks found.")
+        top_result = list(results.values())[0]
+        add_to_watchlist(top_result)
+        st.sidebar.success(f"Added {top_result}")
+        st.rerun()
+
+# Main Ticker Selection Logic
+if 'selected_ticker' in st.session_state:
+    ticker = st.session_state.selected_ticker
 else:
-    ticker = None
+    ticker = "RELIANCE.NS" # Default
 
+st.sidebar.markdown("---")
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
-
-if ticker:
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🏢 Fundamentals")
-    info = get_company_info(ticker)
-    if info:
-        sector = info.get('sector', 'N/A')
-        pe_ratio = info.get('trailingPE', 'N/A')
-        market_cap = info.get('marketCap', 0)
-        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
-        
-        if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
-        elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
-        else: mcap_str = f"₹{market_cap/1e6:.2f}M"
-
-        st.sidebar.info(f"**Sector:** {sector}")
-        st.sidebar.metric("Market Cap", mcap_str)
-        st.sidebar.metric("P/E Ratio", f"{pe_ratio}")
-        st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
-    else:
-        st.sidebar.warning("Fundamental data not available")
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("Chart Display")
-chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🤖 AI Analyst")
-# UPDATED BUTTON: Uses callback to switch state
-st.sidebar.button("Generate Report", on_click=run_ai_analysis)
+chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area"])
 
 # --- MAIN DASHBOARD LOGIC ---
 if ticker:
+    st.header(f"Analysis: {ticker}")
     df = get_stock_data(ticker, period) 
     
     if not df.empty:
-        # Filter zero volume
-        if not df[df['Volume'] > 0].empty:
-            df = df[df['Volume'] > 0]
-        
+        # Filter Volume
+        if not df[df['Volume'] > 0].empty: df = df[df['Volume'] > 0]
         current_price = df['Close'].iloc[-1]
         
-        # Auto Sensitivity
-        valid_n = []
-        for n_scan in range(5, 45, 2): 
-            count = count_levels(df, n_scan, current_price)
-            if 3 <= count <= 6: valid_n.append(n_scan)
-        
-        optimal_n = int(sum(valid_n) / len(valid_n)) if valid_n else 10
-
-        # Sidebar Settings
-        st.sidebar.caption("Overlays")
-        show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
-        show_support = st.sidebar.checkbox("Show Support", value=True)
-        show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
-        show_bb = st.sidebar.checkbox('Show Bollinger Bands')
-        sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
+        # --- TOP METRICS & ALERTS PANEL ---
+        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
         
         # Metrics
-        df['RSI'] = calculate_rsi(df['Close'])
-        current_volatility = df['Volatility'].iloc[-1] * 100 if not np.isnan(df['Volatility'].iloc[-1]) else 0
+        col_m1.metric("Price", f"₹{current_price:.2f}", f"{df['Pct_Change'].iloc[-1]*100:.2f}%")
+        col_m2.metric("RSI (14)", f"{df['RSI'].iloc[-1]:.1f}")
         
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Price", f"₹{current_price:.2f}", f"{((current_price - df['Close'].iloc[-2])/df['Close'].iloc[-2])*100:.2f}%")
-        col2.metric("High", f"₹{df['High'].max():.2f}")
-        col3.metric("Low", f"₹{df['Low'].min():.2f}")
-        col4.metric("Volatility", f"{current_volatility:.2f}%")
+        # Sector Correlation
+        corr, corr_data = get_sector_correlation(ticker)
+        col_m3.metric("Nifty Corr.", f"{corr:.2f}")
 
-        # --- AI REPORT SECTION (CONTROLS VISIBILITY) ---
+        # Live Signals (Logic)
+        signal = "NEUTRAL"
+        color = "off"
+        if df['RSI'].iloc[-1] < 30: 
+            signal = "OVERSOLD (BUY?)"
+            color = "inverse" # Green-ish
+        elif df['RSI'].iloc[-1] > 70: 
+            signal = "OVERBOUGHT (SELL?)"
+            color = "normal" # Red-ish warning
+        
+        col_m4.error(f"Signal: {signal}") if "SELL" in signal else col_m4.success(f"Signal: {signal}") if "BUY" in signal else col_m4.info("Signal: NEUTRAL")
+
+        # --- AI & BACK BUTTON ---
+        if st.sidebar.button("🤖 AI Analysis"):
+            run_ai_analysis()
+            
         if st.session_state.show_ai:
-            if st.button("← Back to Dashboard", type="primary"):
+            if st.button("← Back to Charts"):
                 go_back()
                 st.rerun()
+            with st.spinner("AI analyzing..."):
+                news = get_stock_news(ticker)
+                analysis = get_ai_analysis(ticker, df, news)
+                st.info(analysis)
 
-            with st.spinner(f"Reading news & analyzing charts for {ticker}..."):
-                news_headlines = get_stock_news(ticker)
-                analysis = get_ai_analysis(ticker, df, news_headlines)
-                st.info(f"**AI Analysis:**\n\n{analysis}")
-                
-                with st.expander("📰 Read the News Headlines Used by AI"):
-                    if not news_headlines:
-                        st.write("No specific news found.")
-                    else:
-                        for i, n in enumerate(news_headlines):
-                            if isinstance(n, dict) and 'title' in n and 'link' in n:
-                                st.markdown(f"### {i+1}. [{n['title']}]({n['link']})")
-                                st.caption(f"Published by: {n.get('publisher', 'Unknown')}")
-                                st.divider()
-                            else:
-                                st.write(n)
-        
-        # --- PLOTTING LOGIC (ALWAYS VISIBLE) ---
-        # NOTE: This block is NOT inside 'if st.session_state.show_ai:'
-        
-        tab1, tab2 = st.tabs(["📈 Price Action", "📊 Technical Indicators"])
-        
-        with tab1:
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
+        # --- TABS FOR ANALYSIS ---
+        tab_chart, tab_tech, tab_backtest = st.tabs(["📈 Pro Chart", "📊 Indicators", "🛠 Strategy Tester"])
 
+        # 1. MAIN CHART
+        with tab_chart:
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+            
+            # Price Trace
             if chart_type == "Candlestick":
                 fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-            elif chart_type == "Line":
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Close", line=dict(color='#00e676')), row=1, col=1)
-            elif chart_type == "Area":
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', name="Close", line=dict(color='#2962ff')), row=1, col=1)
-            elif chart_type == "OHLC":
-                fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+            else:
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Price"), row=1, col=1)
+
+            # Patterns (Markers)
+            doji_dates = df[df['Doji']].index
+            if len(doji_dates) > 0:
+                fig.add_trace(go.Scatter(x=doji_dates, y=df.loc[doji_dates]['High'], mode='markers', marker=dict(symbol='diamond', size=5, color='yellow'), name="Doji"), row=1, col=1)
             
-            if show_ema:
-                fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
+            hammer_dates = df[df['Hammer']].index
+            if len(hammer_dates) > 0:
+                fig.add_trace(go.Scatter(x=hammer_dates, y=df.loc[hammer_dates]['Low'], mode='markers', marker=dict(symbol='triangle-up', size=8, color='purple'), name="Hammer"), row=1, col=1)
 
-            if show_bb and 'Upper_Band' in df.columns:
-                fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
-                fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
-
-            if show_support or show_resistance:
-                 levels = []
-                 n = int(sensitivity)
-                 for i in range(n, df.shape[0]-n):
-                     if show_support and is_support(df, i, n):
-                         l = df['Low'][i]
-                         if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
-                             levels.append((df.index[i], l, "Support"))
-                     elif show_resistance and is_resistance(df, i, n):
-                         l = df['High'][i]
-                         if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
-                             levels.append((df.index[i], l, "Resistance"))
-                 for date, level, kind in levels:
-                     color = "green" if kind == "Support" else "red"
-                     fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
-
-            colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
+            # Volume
+            colors = ['green' if o-c <= 0 else 'red' for o, c in zip(df['Open'], df['Close'])]
             fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
-
-            fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            
+            fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
 
-        with tab2:
-            st.subheader("Momentum & Strength")
-            fig_macd = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5])
+        # 2. INDICATORS TAB
+        with tab_tech:
+            st.subheader("Deep Dive Indicators")
+            fig2 = make_subplots(rows=3, cols=1, shared_xaxes=True)
             
-            fig_macd.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#b388ff', width=2), name='RSI'), row=1, col=1)
-            fig_macd.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
-            fig_macd.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
-            fig_macd.update_yaxes(title_text="RSI", row=1, col=1)
+            # RSI
+            fig2.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color='purple')), row=1, col=1)
+            fig2.add_hline(y=70, row=1, col=1, line_dash="dash", line_color="red")
+            fig2.add_hline(y=30, row=1, col=1, line_dash="dash", line_color="green")
             
-            if 'MACD' in df.columns:
-                colors_macd = ['#00e676' if val >= 0 else '#ff1744' for val in df['MACD'] - df['Signal_Line']]
-                fig_macd.add_trace(go.Bar(x=df.index, y=df['MACD'] - df['Signal_Line'], marker_color=colors_macd, name='MACD Hist'), row=2, col=1)
-                fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#2962ff', width=1), name='MACD'), row=2, col=1)
-                fig_macd.add_trace(go.Scatter(x=df.index, y=df['Signal_Line'], line=dict(color='#ff9100', width=1), name='Signal'), row=2, col=1)
-                fig_macd.update_yaxes(title_text="MACD", row=2, col=1)
+            # MACD
+            fig2.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD"), row=2, col=1)
+            fig2.add_trace(go.Scatter(x=df.index, y=df['Signal_Line'], name="Signal"), row=2, col=1)
+            fig2.add_trace(go.Bar(x=df.index, y=df['MACD']-df['Signal_Line'], name="Hist"), row=2, col=1)
+            
+            # Volatility
+            fig2.add_trace(go.Scatter(x=df.index, y=df['Volatility'], name="Volatility", line=dict(color='orange')), row=3, col=1)
+            
+            fig2.update_layout(height=800, template="plotly_dark")
+            st.plotly_chart(fig2, use_container_width=True)
 
-            fig_macd.update_layout(height=500, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
-            st.plotly_chart(fig_macd, use_container_width=True)
+        # 3. BACKTEST TAB
+        with tab_backtest:
+            st.subheader("Strategy Lab: SMA Crossover")
+            col_b1, col_b2 = st.columns(2)
+            fast_ma = col_b1.number_input("Fast MA", 5, 50, 20)
+            slow_ma = col_b2.number_input("Slow MA", 20, 200, 50)
+            
+            if st.button("Run Backtest"):
+                res_df, total_ret = run_backtest(df.copy(), fast_ma, slow_ma)
+                
+                st.metric("Total Return", f"₹{total_ret:.2f}", f"{(total_ret/100000)*100:.1f}%")
+                
+                # Plot Equity Curve
+                fig_bt = go.Figure()
+                fig_bt.add_trace(go.Scatter(x=res_df.index, y=res_df['Portfolio_Value'], fill='tozeroy', name="Portfolio Value"))
+                fig_bt.update_layout(title="Equity Curve", template="plotly_dark")
+                st.plotly_chart(fig_bt, use_container_width=True)
+
     else:
-        st.error("Error loading data.")
+        st.error("Could not load data for this ticker.")
+else:
+    st.info("Select a stock from the Watchlist or Search to begin.")
