@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
 st.title("Algorithmic Dashboard")
 
-# --- SESSION STATE SETUP (For Back Button) ---
+# --- SESSION STATE SETUP ---
 if 'show_ai' not in st.session_state:
     st.session_state.show_ai = False
 
@@ -59,19 +59,18 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- NEW: HYBRID PATTERN RECOGNITION ENGINE (ADDED) ---
+# --- UPDATED: PATTERN RECOGNITION (With Offset for Visibility) ---
 def detect_candlestick_patterns(df):
     """
-    Hybrid Engine:
-    1. Tries to import TA-Lib (Fast C library).
-    2. If missing (common on Py 3.14), falls back to pure Python math.
+    Hybrid Engine with VISIBILITY OFFSET.
+    Moves markers slightly away from the wick so they don't cover the High/Low.
     """
     patterns = []
+    offset_pct = 0.015 # 1.5% offset
     
-    # --- OPTION A: TA-LIB (Advanced) ---
+    # --- OPTION A: TA-LIB ---
     try:
         import talib
-        # If this import succeeds, we use these powerful functions
         hammer = talib.CDLHAMMER(df['Open'], df['High'], df['Low'], df['Close'])
         star = talib.CDLSHOOTINGSTAR(df['Open'], df['High'], df['Low'], df['Close'])
         engulfing = talib.CDLENGULFING(df['Open'], df['High'], df['Low'], df['Close'])
@@ -82,26 +81,25 @@ def detect_candlestick_patterns(df):
             if df['Volume'].iloc[i] == 0: continue
             date = df.index[i]
             
-            # Prioritize signals
+            # Note: Prices multiplied by offset to push marker away from wick
             if morning[i] == 100:
-                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Morn. Star', 'color': 'green', 'symbol': 'triangle-up'})
+                patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Morn. Star', 'color': 'green', 'symbol': 'triangle-up'})
             elif evening[i] == -100:
-                patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Even. Star', 'color': 'red', 'symbol': 'triangle-down'})
+                patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Even. Star', 'color': 'red', 'symbol': 'triangle-down'})
             elif engulfing[i] == 100:
-                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
+                patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
             elif engulfing[i] == -100:
-                patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
+                patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
             elif hammer[i] == 100:
-                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Hammer', 'color': 'yellow', 'symbol': 'triangle-up'})
+                patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Hammer', 'color': 'yellow', 'symbol': 'triangle-up'})
             elif star[i] == -100:
-                patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
+                patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
                 
         return patterns
 
-    # --- OPTION B: MANUAL MATH (Fallback) ---
+    # --- OPTION B: MANUAL MATH ---
     except ImportError:
-        # Pre-calculate candle properties
-        df = df.copy() # Avoid SettingWithCopy warning
+        df = df.copy() 
         df['Body'] = abs(df['Close'] - df['Open'])
         df['Upper_Shadow'] = df['High'] - df[['Close', 'Open']].max(axis=1)
         df['Lower_Shadow'] = df[['Close', 'Open']].min(axis=1) - df['Low']
@@ -118,48 +116,32 @@ def detect_candlestick_patterns(df):
             prev_close = df['Close'].iloc[i-1]
             prev_color = df['Color'].iloc[i-1]
             
-            # 1. Hammer (Bottom Reversal)
             if (lower > 2 * body) and (upper < 0.5 * body) and (body > 0):
-                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Hammer', 'color': 'yellow', 'symbol': 'triangle-up'})
-
-            # 2. Shooting Star (Top Reversal)
+                patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Hammer', 'color': 'yellow', 'symbol': 'triangle-up'})
             elif (upper > 2 * body) and (lower < 0.5 * body) and (body > 0):
-                 patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
-
-            # 3. Bullish Engulfing
+                 patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
             elif (color == 'Green') and (prev_color == 'Red'):
                 if (df['Close'].iloc[i] > prev_open) and (df['Open'].iloc[i] < prev_close):
-                     patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
-
-            # 4. Bearish Engulfing
+                     patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
             elif (color == 'Red') and (prev_color == 'Green'):
                 if (df['Close'].iloc[i] < prev_open) and (df['Open'].iloc[i] > prev_close):
-                    patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
+                    patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
 
         return patterns
 
-# --- AUTO-SENSITIVITY CALCULATOR ---
+# --- AUTO-SENSITIVITY ---
 def calculate_optimal_sensitivity(df):
-    """
-    Iterates through sensitivity values to find one that produces 
-    3-6 support/resistance lines.
-    """
-    # Test values in order of preference (Standard -> Smooth -> Granular)
     test_values = [20, 15, 25, 30, 10, 35, 40]
     best_n = 20
     min_dist_to_ideal = float('inf')
-    
     current_price = df['Close'].iloc[-1]
     
     for n in test_values:
         level_count = 0
         levels = []
-        
-        # Fast scan for levels
         for i in range(n, df.shape[0]-n):
             if is_support(df, i, n):
                 l = df['Low'][i]
-                # Check proximity to existing levels
                 if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
                     levels.append(l)
                     level_count += 1
@@ -168,46 +150,33 @@ def calculate_optimal_sensitivity(df):
                 if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
                     levels.append(l)
                     level_count += 1
-        
-        # Ideal range is 3 to 5 lines
-        if 3 <= level_count <= 5:
-            return n # Found perfect match, return immediately
-        
-        # Otherwise, track which n gets us closest to 4 lines
+        if 3 <= level_count <= 5: return n 
         dist = abs(level_count - 4)
         if dist < min_dist_to_ideal:
             min_dist_to_ideal = dist
             best_n = n
-            
     return best_n
 
-# --- ROBUST FUNDAMENTALS FETCH ---
+# --- FUNDAMENTALS ---
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     stock = yf.Ticker(ticker)
     info = None
-    try:
-        info = stock.info
-    except Exception:
-        pass 
-
-    if not info:
-        info = {}
-        
+    try: info = stock.info
+    except Exception: pass 
+    if not info: info = {}
     if 'marketCap' not in info:
         try:
             fast = stock.fast_info
             if fast and fast.market_cap:
                 info['marketCap'] = fast.market_cap
-                if 'sector' not in info: info['sector'] = "N/A (Data Unavailable)"
+                if 'sector' not in info: info['sector'] = "N/A"
                 if 'trailingPE' not in info: info['trailingPE'] = "N/A"
                 if 'dividendYield' not in info: info['dividendYield'] = 0
-        except Exception:
-            pass
-
+        except Exception: pass
     return info if ('marketCap' in info or 'sector' in info) else None
 
-# --- MARKET COMPARISON ---
+# --- COMPARISON ---
 @st.cache_data(ttl=3600)
 def get_market_comparison(ticker, period):
     try:
@@ -221,7 +190,7 @@ def get_market_comparison(ticker, period):
     except Exception as e:
         return None, 0
 
-# --- NEWS FUNCTION ---
+# --- NEWS ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     try:
@@ -241,7 +210,7 @@ def get_stock_news(ticker):
     except Exception as e:
         return []
 
-# --- AI ANALYST FUNCTION ---
+# --- AI ANALYST ---
 def get_ai_analysis(ticker, data, news_list):
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
@@ -319,7 +288,7 @@ def get_stock_data(ticker, period):
 
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
-search_query = st.sidebar.text_input("Search Company", "Tata")
+search_query = st.sidebar.text_input("Search Company", "Reliance")
 
 if search_query:
     results = search_tickers(search_query)
@@ -379,19 +348,23 @@ if ticker:
         
         current_price = df['Close'].iloc[-1]
         
-        # --- AUTO-SENSITIVITY CALCULATION ---
-        # Calculate optimal n for 3-5 lines
+        # Calculate Period Extremes for the Visibility Fix
+        period_high = df['High'].max()
+        period_low = df['Low'].min()
+        high_date = df['High'].idxmax()
+        low_date = df['Low'].idxmin()
+
         optimal_n = calculate_optimal_sensitivity(df)
 
         st.sidebar.caption("Overlays")
         show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
-        # --- NEW: PATTERN TOGGLE ---
         show_patterns = st.sidebar.checkbox("Show Patterns (Hammer/Engulfing)", value=False)
         show_bb = st.sidebar.checkbox('Show Bollinger Bands')
+        # --- NEW VISIBILITY TOGGLE ---
+        show_range = st.sidebar.checkbox('Show Period High/Low Tags', value=True)
         
-        # Using key=ticker ensures the slider resets to optimal_n when ticker changes
         sensitivity = st.sidebar.number_input("Sensitivity (Auto-Optimized)", 
                                               min_value=2, max_value=50, 
                                               value=optimal_n, 
@@ -403,8 +376,8 @@ if ticker:
         
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Price", f"₹{current_price:.2f}", f"{((current_price - df['Close'].iloc[-2])/df['Close'].iloc[-2])*100:.2f}%")
-        col2.metric("High", f"₹{df['High'].max():.2f}")
-        col3.metric("Low", f"₹{df['Low'].min():.2f}")
+        col2.metric("High", f"₹{period_high:.2f}")
+        col3.metric("Low", f"₹{period_low:.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
         # --- AI REPORT SECTION ---
@@ -437,7 +410,12 @@ if ticker:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
 
             if chart_type == "Candlestick":
-                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+                fig.add_trace(go.Candlestick(
+                    x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], 
+                    name="Price",
+                    # Thicker wicks for better visibility
+                    increasing_line_width=1.5, decreasing_line_width=1.5
+                ), row=1, col=1)
             elif chart_type == "Line":
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Close", line=dict(color='#00e676')), row=1, col=1)
             elif chart_type == "Area":
@@ -445,6 +423,32 @@ if ticker:
             elif chart_type == "OHLC":
                 fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             
+            # --- NEW: VISIBILITY FIX (TAGS + RANGE LINES) ---
+            if show_range:
+                # High Label
+                fig.add_annotation(
+                    x=high_date, y=period_high,
+                    text=f"High: {period_high:.2f}",
+                    showarrow=True, arrowhead=2, arrowcolor="white",
+                    ax=0, ay=-40, # Push text up
+                    font=dict(color="white", size=11, family="Arial Black"),
+                    bgcolor="rgba(200, 0, 0, 0.6)", bordercolor="red", borderwidth=1,
+                    row=1, col=1
+                )
+                # Low Label
+                fig.add_annotation(
+                    x=low_date, y=period_low,
+                    text=f"Low: {period_low:.2f}",
+                    showarrow=True, arrowhead=2, arrowcolor="white",
+                    ax=0, ay=40, # Push text down
+                    font=dict(color="white", size=11, family="Arial Black"),
+                    bgcolor="rgba(0, 150, 0, 0.6)", bordercolor="green", borderwidth=1,
+                    row=1, col=1
+                )
+                # Range Lines (Box the price)
+                fig.add_hline(y=period_high, line_dash="longdash", line_color="rgba(255, 0, 0, 0.3)", row=1, col=1)
+                fig.add_hline(y=period_low, line_dash="longdash", line_color="rgba(0, 255, 0, 0.3)", row=1, col=1)
+
             if show_ema:
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
@@ -453,7 +457,6 @@ if ticker:
                 fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
 
-            # --- NEW: PLOT DETECTED PATTERNS ---
             if show_patterns:
                 patterns = detect_candlestick_patterns(df)
                 if patterns:
@@ -470,7 +473,6 @@ if ticker:
 
             if show_support or show_resistance:
                  levels = []
-                 # Use the sensitivity from the slider (which is now auto-optimized by default)
                  n = int(sensitivity)
                  for i in range(n, df.shape[0]-n):
                      if show_support and is_support(df, i, n):
