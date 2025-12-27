@@ -201,13 +201,13 @@ def get_stock_data(ticker, period):
     df['Pct_Change'] = df['Close'].pct_change()
     df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
     
-    # --- NEW: MACD ---
+    # --- NEW: MACD (The Missing Piece) ---
     df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
     df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
-    # --- NEW: BOLLINGER BANDS ---
+    # --- NEW: BOLLINGER BANDS (The Missing Piece) ---
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['STD_20'] = df['Close'].rolling(window=20).std()
     df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
