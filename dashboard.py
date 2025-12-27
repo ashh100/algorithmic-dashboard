@@ -15,6 +15,10 @@ st.title("Algorithmic Dashboard")
 if 'show_ai' not in st.session_state:
     st.session_state.show_ai = False
 
+# [NEW] Initialize Portfolio in Session State
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = []
+
 def run_ai_analysis():
     st.session_state.show_ai = True
 
@@ -61,10 +65,6 @@ def calculate_rsi(data, window=14):
 
 # --- PATTERN RECOGNITION (With Offset for Visibility) ---
 def detect_candlestick_patterns(df):
-    """
-    Hybrid Engine with VISIBILITY OFFSET.
-    Moves markers slightly away from the wick so they don't cover the High/Low.
-    """
     patterns = []
     offset_pct = 0.015 # 1.5% offset
     
@@ -81,7 +81,6 @@ def detect_candlestick_patterns(df):
             if df['Volume'].iloc[i] == 0: continue
             date = df.index[i]
             
-            # Note: Prices multiplied by offset to push marker away from wick
             if morning[i] == 100:
                 patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Morn. Star', 'color': 'green', 'symbol': 'triangle-up'})
             elif evening[i] == -100:
@@ -348,7 +347,7 @@ if ticker:
         
         current_price = df['Close'].iloc[-1]
         
-        # Calculate Period Extremes
+        # Calculate Period Extremes (Used in Metrics at top)
         period_high = df['High'].max()
         period_low = df['Low'].min()
         high_date = df['High'].idxmax()
@@ -362,7 +361,6 @@ if ticker:
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
         show_patterns = st.sidebar.checkbox("Show Patterns (Hammer/Engulfing)", value=False)
         show_bb = st.sidebar.checkbox('Show Bollinger Bands')
-        
         
         sensitivity = st.sidebar.number_input("Sensitivity (Auto-Optimized)", 
                                               min_value=2, max_value=50, 
@@ -403,13 +401,13 @@ if ticker:
                                 st.write(n)
         
         # --- PLOTTING LOGIC ---
-        tab1, tab2, tab3 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison"])
+        # [MODIFIED] Added "Portfolio" to tabs
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison", "💼 Portfolio"])
         
         with tab1:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
 
             if chart_type == "Candlestick":
-                # --- UPDATED CANDLESTICK VISUALIZATION ---
                 fig.add_trace(go.Candlestick(
                     x=df.index, 
                     open=df['Open'], 
@@ -417,10 +415,8 @@ if ticker:
                     low=df['Low'], 
                     close=df['Close'], 
                     name="Price",
-                    # Vibrant colors for clear High/Low visibility
-                    increasing_line_color='#00e676', # Neon Green
-                    decreasing_line_color='#ff1744', # Neon Red
-                    # Thicker wicks to make the daily range more obvious
+                    increasing_line_color='#00e676', 
+                    decreasing_line_color='#ff1744', 
                     increasing_line_width=1.5, 
                     decreasing_line_width=1.5
                 ), row=1, col=1)
@@ -430,9 +426,7 @@ if ticker:
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', name="Close", line=dict(color='#2962ff')), row=1, col=1)
             elif chart_type == "OHLC":
                 fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-            
-            # --- VISIBILITY FIX (TAGS + RANGE LINES) ---
-           
+
             if show_ema:
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
@@ -471,7 +465,7 @@ if ticker:
                      color = "green" if kind == "Support" else "red"
                      fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
 
-            # Volume Colors matching the new Vibrant Candlesticks
+            # Volume Colors
             colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
             fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
 
@@ -515,6 +509,88 @@ if ticker:
                 st.plotly_chart(fig_comp, use_container_width=True)
             else:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
+        
+        # [NEW] Portfolio Tracker Tab
+        with tab4:
+            st.subheader("💼 Portfolio Tracker")
+            
+            # Input Form
+            with st.expander("Add New Position", expanded=False):
+                c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+                with c1:
+                    new_ticker = st.text_input("Ticker Symbol", value=ticker if ticker else "").upper()
+                with c2:
+                    new_qty = st.number_input("Quantity", min_value=1, value=10)
+                with c3:
+                    new_price = st.number_input("Avg Buy Price", min_value=0.1, value=current_price)
+                with c4:
+                    st.write("") # Spacer
+                    st.write("")
+                    if st.button("Add"):
+                        st.session_state.portfolio.append({
+                            "Ticker": new_ticker,
+                            "Quantity": new_qty,
+                            "Buy Price": new_price
+                        })
+                        st.rerun()
+
+            # Display Portfolio
+            if st.session_state.portfolio:
+                pf_df = pd.DataFrame(st.session_state.portfolio)
+                
+                # Fetch Real-time prices
+                unique_tickers = pf_df['Ticker'].unique().tolist()
+                realtime_data = {}
+                try:
+                    # Batch fetch for speed
+                    rt_quotes = yf.download(unique_tickers, period="1d", progress=False)['Close']
+                    # Handle if only 1 ticker (returns Series) vs multiple (returns DF)
+                    if len(unique_tickers) == 1:
+                        # yf.download structure varies by version, handling safe access
+                        val = rt_quotes.iloc[-1] if not rt_quotes.empty else 0
+                        realtime_data[unique_tickers[0]] = float(val)
+                    else:
+                        for t in unique_tickers:
+                            if t in rt_quotes.columns:
+                                realtime_data[t] = float(rt_quotes[t].iloc[-1])
+                            else:
+                                realtime_data[t] = 0
+                except Exception as e:
+                    st.error(f"Error fetching portfolio prices: {e}")
+
+                # Calculations
+                pf_df['Current Price'] = pf_df['Ticker'].map(realtime_data).fillna(0)
+                pf_df['Invested Value'] = pf_df['Quantity'] * pf_df['Buy Price']
+                pf_df['Current Value'] = pf_df['Quantity'] * pf_df['Current Price']
+                pf_df['P/L'] = pf_df['Current Value'] - pf_df['Invested Value']
+                pf_df['P/L %'] = (pf_df['P/L'] / pf_df['Invested Value']) * 100
+
+                # Summary Metrics
+                total_invested = pf_df['Invested Value'].sum()
+                total_current = pf_df['Current Value'].sum()
+                total_pl = pf_df['P/L'].sum()
+                
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Invested", f"₹{total_invested:,.2f}")
+                m2.metric("Current Value", f"₹{total_current:,.2f}")
+                m3.metric("Total P/L", f"₹{total_pl:,.2f}", delta=f"{total_pl:,.2f}")
+
+                # Styling the dataframe
+                st.dataframe(pf_df.style.format({
+                    "Buy Price": "₹{:.2f}", 
+                    "Current Price": "₹{:.2f}",
+                    "Invested Value": "₹{:.2f}",
+                    "Current Value": "₹{:.2f}",
+                    "P/L": "₹{:.2f}",
+                    "P/L %": "{:.2f}%"
+                }).applymap(lambda x: 'color: green' if x > 0 else 'color: red', subset=['P/L', 'P/L %']),
+                use_container_width=True)
+                
+                if st.button("Clear Portfolio"):
+                    st.session_state.portfolio = []
+                    st.rerun()
+            else:
+                st.info("Your portfolio is empty. Add a stock above to track performance.")
 
     else:
         st.error("Error loading data.")
