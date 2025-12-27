@@ -292,54 +292,40 @@ def get_stock_data(ticker, period):
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
 
-# --- [NEW LOGIC] Check for Portfolio Update ---
-# If the user clicked "View on Dashboard" in the portfolio, use that ticker.
-# Otherwise, default to "Reliance".
-default_search = "Reliance"
-if "ticker" in st.session_state and st.session_state["ticker"]:
-    default_search = st.session_state["ticker"]
+# --- [FIX] STABLE SEARCH BAR ---
+# We removed 'value=...' so this box won't auto-update and reset your scroll
+# It now only updates when YOU type in it.
+search_query = st.sidebar.text_input("Search Company") 
 
-search_query = st.sidebar.text_input("Search Company", value=default_search)
-# ---------------------------------------------
-
+# Logic to find ticker
 if search_query:
     results = search_tickers(search_query)
     if results:
-        # --- [NEW LOGIC] Auto-Select Index ---
-        # We need to find where our desired ticker is in the list of results
-        options_keys = list(results.keys())
-        options_values = list(results.values())
-        
-        # Default to the first option (index 0)
-        select_index = 0
-        
-        # If the session_state ticker exists in these results, switch to that index
-        if "ticker" in st.session_state and st.session_state["ticker"] in options_values:
-            select_index = options_values.index(st.session_state["ticker"])
-
-        selected_label = st.sidebar.selectbox(
-            "Select Stock", 
-            options=options_keys, 
-            index=select_index
-        )
-        # -------------------------------------
-        
+        selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
         ticker = results[selected_label]
         
-        # Ensure global session state stays synced with this selection
+        # Sync global state only when searching via sidebar
         st.session_state["ticker"] = ticker
-        
     else:
         st.sidebar.error("No stocks found.")
         ticker = None
 else:
-    ticker = None
+    # If sidebar search is empty, use the Global Session State (set by Portfolio or Default)
+    # This keeps the Dashboard working without forcing the Sidebar text box to reload
+    if "ticker" not in st.session_state:
+        st.session_state["ticker"] = "RELIANCE.NS" # Default
+    
+    ticker = st.session_state["ticker"]
 
+# Time Period Selector
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
+# --- FUNDAMENTALS SECTION ---
 if ticker:
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🏢 Fundamentals")
+    st.sidebar.subheader(f"📍 {ticker}") # Shows which stock is active
+    
+    # Fetch Data
     info = get_company_info(ticker)
     
     if info:
@@ -348,6 +334,7 @@ if ticker:
         market_cap = info.get('marketCap', 0)
         div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         
+        # Formatting
         if pe_ratio != 'N/A':
             pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
         else:
@@ -357,6 +344,7 @@ if ticker:
         elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
         else: mcap_str = f"₹{market_cap/1e6:.2f}M"
 
+        # Display Metrics
         st.sidebar.info(f"**Sector:** {sector}")
         st.sidebar.metric("Market Cap", mcap_str)
         st.sidebar.metric("P/E Ratio", pe_str)
