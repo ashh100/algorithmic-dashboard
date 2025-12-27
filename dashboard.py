@@ -117,7 +117,7 @@ def get_ai_analysis(ticker, data, news_list):
     
     # 4. Payload (Using Llama 3 for speed and smarts)
     payload = {
-        "model": "llama3-8b-8192",
+        "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
