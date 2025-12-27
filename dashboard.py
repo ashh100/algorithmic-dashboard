@@ -1,3 +1,6 @@
+THIS IS THE PROJECT CODE (V1) 
+
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -9,28 +12,48 @@ import xml.etree.ElementTree as ET
 
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
-st.title("⚡ Ashwath's Market Terminal")
+st.title("Algorithmic Dashboard")
 
-# --- SESSION STATE ---
-if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS']
+# --- SESSION STATE SETUP (For Back Button) ---
 if 'show_ai' not in st.session_state:
     st.session_state.show_ai = False
-
-# --- UTILITY FUNCTIONS ---
-def add_to_watchlist(ticker):
-    if ticker and ticker not in st.session_state.watchlist:
-        st.session_state.watchlist.append(ticker)
-
-def remove_from_watchlist(ticker):
-    if ticker in st.session_state.watchlist:
-        st.session_state.watchlist.remove(ticker)
 
 def run_ai_analysis():
     st.session_state.show_ai = True
 
 def go_back():
     st.session_state.show_ai = False
+
+# --- UTILITY FUNCTIONS ---
+def search_tickers(query):
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10&newsCount=0"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        search_results = {}
+        if 'quotes' in data:
+            for quote in data['quotes']:
+                if 'shortname' in quote and 'symbol' in quote:
+                    label = f"{quote['symbol']} - {quote['shortname']}"
+                    search_results[label] = quote['symbol']
+        return search_results
+    except:
+        return {}
+
+def is_support(df, i, n):
+    for k in range(1, n+1):
+        if i-k < 0 or i+k >= len(df): continue
+        if df['Low'][i] >= df['Low'][i-k] or df['Low'][i] >= df['Low'][i+k]:
+            return False
+    return True
+
+def is_resistance(df, i, n):
+    for k in range(1, n+1): 
+        if i-k < 0 or i+k >= len(df): continue
+        if df['High'][i] <= df['High'][i-k] or df['High'][i] <= df['High'][i+k]:
+            return False
+    return True
 
 def calculate_rsi(data, window=14):
     delta = data.diff()
@@ -39,12 +62,28 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+def count_levels(df, n, current_price):
+    levels = []
+    for i in range(n, df.shape[0]-n):
+        if is_support(df, i, n):
+            l = df['Low'][i]
+            if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
+                levels.append(l)
+        elif is_resistance(df, i, n):
+            l = df['High'][i]
+            if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
+                levels.append(l)
+    return len(levels)
+
+# --- NEWS FUNCTION ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     try:
         search_term = ticker.split('.')[0] 
         url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
         response = requests.get(url, headers=headers, timeout=5)
         root = ET.fromstring(response.content)
         news_items = []
@@ -56,27 +95,51 @@ def get_stock_news(ticker):
             news_items.append({'title': title, 'link': link, 'publisher': publisher})
         return news_items
     except Exception as e:
+        print(f"News fetch error for {ticker}: {e}")
         return []
 
+# --- AI ANALYST FUNCTION ---
 def get_ai_analysis(ticker, data, news_list):
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
-    if news_list:
-        formatted_news = "\n".join([f"- {item['title']} ({item['publisher']})" for item in news_list])
+    if news_list and len(news_list) > 0:
+        formatted_news = []
+        for item in news_list:
+            if isinstance(item, dict):
+                formatted_news.append(f"- {item['title']} (Source: {item['publisher']})")
+            else:
+                formatted_news.append(f"- {item}")
+        news_context = "\n".join(formatted_news)
     else:
-        formatted_news = "No recent news."
-
+        news_context = "No recent news available."
+    
+    API_URL = "https://api.groq.com/openai/v1/chat/completions"
+    
     try:
         if "GROQ_API_KEY" in st.secrets:
             api_key = st.secrets["GROQ_API_KEY"]
         else:
-            return "⚠️ Error: GROQ_API_KEY missing in secrets."
-    except:
-        return "⚠️ Error: Secrets not loaded."
+            return "⚠️ Error: GROQ_API_KEY missing in .streamlit/secrets.toml"
+    except Exception:
+        return "⚠️ Error: Could not load secrets."
 
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    prompt = f"Analyze {ticker}. Price: {current_price}. Data: {recent_data}. News: {formatted_news}. Give Trend, Reason, and Action."
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    prompt = f"""
+    You are a Wall Street analyst. Analyze {ticker} based on this data:
+    Price: {current_price}
+    Recent Data: {recent_data}
+    News: {news_context}
+    
+    Provide a "Trader's Take":
+    1. Trend (Bullish/Bearish/Neutral)
+    2. One Key Reason
+    3. Action (Buy/Sell/Wait)
+    """
     
     payload = {
         "model": "llama-3.3-70b-versatile",
@@ -85,151 +148,217 @@ def get_ai_analysis(ticker, data, news_list):
     }
 
     try:
-        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-        return response.json()['choices'][0]['message']['content']
+        response = requests.post(API_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+             return f"API Error {response.status_code}: {response.text}"
+        result = response.json()
+        return result['choices'][0]['message']['content']
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Connection Error: {str(e)}"
 
+# --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
     stock = yf.Ticker(ticker)
     df = stock.history(period=period)
     if df.empty: return df
     
-    # Basic Indicators
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    df['RSI'] = calculate_rsi(df['Close'])
-    df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
-    df['Signal_Line'] = df['MACD'].ewm(span=9).mean()
+    df['Pct_Change'] = df['Close'].pct_change()
+    df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
+    
+    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['STD_20'] = df['Close'].rolling(window=20).std()
+    df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
+    df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
     
     return df
 
-# --- SIDEBAR ---
-st.sidebar.header("📁 Watchlist")
+@st.cache_data(ttl=86400) 
+def get_company_info(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.info
+    except:
+        return None
 
-# 1. Watchlist Buttons
-for stock in st.session_state.watchlist:
-    col1, col2 = st.sidebar.columns([0.8, 0.2])
-    # Clicking the name sets the ticker
-    if col1.button(stock, key=stock, use_container_width=True):
-        st.session_state.selected_ticker = stock
-    # Clicking X removes it
-    if col2.button("✖", key=f"del_{stock}"):
-        remove_from_watchlist(stock)
-        st.rerun()
+# --- SIDEBAR & CONTROLS ---
+st.sidebar.header("Controls")
+search_query = st.sidebar.text_input("Search Company", "Tata")
 
-st.sidebar.markdown("---")
-new_ticker = st.sidebar.text_input("Add Ticker", placeholder="e.g. TATAMOTORS.NS")
-if st.sidebar.button("Add to List"):
-    add_to_watchlist(new_ticker.upper())
-    st.rerun()
-
-# 2. Settings
-st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Settings")
-period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
-chart_style = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line"])
-
-# --- MAIN PAGE LOGIC ---
-if 'selected_ticker' not in st.session_state:
-    st.session_state.selected_ticker = "RELIANCE.NS"
-
-ticker = st.session_state.selected_ticker
-
-# Fetch Data
-df = get_stock_data(ticker, period)
-
-if not df.empty:
-    current_price = df['Close'].iloc[-1]
-    prev_close = df['Close'].iloc[-2]
-    change = ((current_price - prev_close)/prev_close)*100
-    
-    # --- HEADER SECTION (Clean Metrics) ---
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric(label=ticker, value=f"₹{current_price:.2f}", delta=f"{change:.2f}%")
-    col2.metric("RSI (14)", f"{df['RSI'].iloc[-1]:.1f}")
-    col3.metric("Volume", f"{df['Volume'].iloc[-1]/1e6:.2f}M")
-    
-    # Signal Box (Fixed logic)
-    rsi_val = df['RSI'].iloc[-1]
-    if rsi_val < 30:
-        col4.success("Signal: OVERSOLD (Buy?)")
-    elif rsi_val > 70:
-        col4.error("Signal: OVERBOUGHT (Sell?)")
+if search_query:
+    results = search_tickers(search_query)
+    ticker = results[list(results.keys())[0]] if results else None
+    if results:
+        selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
+        ticker = results[selected_label]
     else:
-        col4.info("Signal: NEUTRAL")
-
-    # --- AI SECTION (Expandable) ---
-    st.markdown("---")
-    # Toggle button
-    if st.button(f"🤖 Ask AI Analyst about {ticker}"):
-        run_ai_analysis()
-    
-    if st.session_state.show_ai:
-        if st.button("✖ Close Report"):
-            go_back()
-            st.rerun()
-            
-        with st.container():
-            st.info("Generating analysis...")
-            news = get_stock_news(ticker)
-            analysis = get_ai_analysis(ticker, df, news)
-            st.success(f"**AI Report:**\n\n{analysis}")
-
-    # --- TABS (Organized Views) ---
-    st.markdown("### Market Data")
-    tab1, tab2 = st.tabs(["📈 Price Chart", "🛠 Strategy Tester"])
-    
-    with tab1:
-        # Simple, Clean Chart
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.1)
-        
-        if chart_style == "Candlestick":
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-        else:
-            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', name="Price"), row=1, col=1)
-            
-        # Add EMA
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='orange', width=1), name="EMA 20"), row=1, col=1)
-        
-        # Volume
-        colors = ['red' if row['Open'] - row['Close'] > 0 else 'green' for i, row in df.iterrows()]
-        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name="Volume"), row=2, col=1)
-        
-        fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with tab2:
-        st.write("### Simple Moving Average Strategy")
-        c1, c2 = st.columns(2)
-        short_window = c1.number_input("Short Window", 10, 50, 20)
-        long_window = c2.number_input("Long Window", 50, 200, 50)
-        
-        if st.button("Run Backtest"):
-            # Simple vector backtest
-            signals = pd.DataFrame(index=df.index)
-            signals['signal'] = 0.0
-            signals['short_mavg'] = df['Close'].rolling(window=short_window, min_periods=1, center=False).mean()
-            signals['long_mavg'] = df['Close'].rolling(window=long_window, min_periods=1, center=False).mean()
-            signals['signal'][short_window:] = np.where(signals['short_mavg'][short_window:] > signals['long_mavg'][short_window:], 1.0, 0.0)   
-            signals['positions'] = signals['signal'].diff()
-            
-            # Plot
-            fig_bt = go.Figure()
-            fig_bt.add_trace(go.Scatter(x=df.index, y=df['Close'], name="Price", line=dict(color='gray', width=1)))
-            fig_bt.add_trace(go.Scatter(x=signals.index, y=signals['short_mavg'], name="Short MA", line=dict(color='orange')))
-            fig_bt.add_trace(go.Scatter(x=signals.index, y=signals['long_mavg'], name="Long MA", line=dict(color='blue')))
-            
-            # Buy/Sell markers
-            buy_signals = signals.loc[signals.positions == 1.0]
-            sell_signals = signals.loc[signals.positions == -1.0]
-            
-            fig_bt.add_trace(go.Scatter(x=buy_signals.index, y=df.loc[buy_signals.index]['Close'], mode='markers', marker=dict(symbol='triangle-up', color='green', size=10), name="Buy"))
-            fig_bt.add_trace(go.Scatter(x=sell_signals.index, y=df.loc[sell_signals.index]['Close'], mode='markers', marker=dict(symbol='triangle-down', color='red', size=10), name="Sell"))
-            
-            fig_bt.update_layout(template="plotly_dark", height=500)
-            st.plotly_chart(fig_bt, use_container_width=True)
-
+        st.sidebar.error("No stocks found.")
 else:
-    st.error("No data found. Please check the ticker symbol.")
+    ticker = None
+
+period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
+
+if ticker:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🏢 Fundamentals")
+    info = get_company_info(ticker)
+    if info:
+        sector = info.get('sector', 'N/A')
+        pe_ratio = info.get('trailingPE', 'N/A')
+        market_cap = info.get('marketCap', 0)
+        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        
+        if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
+        elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
+        else: mcap_str = f"₹{market_cap/1e6:.2f}M"
+
+        st.sidebar.info(f"**Sector:** {sector}")
+        st.sidebar.metric("Market Cap", mcap_str)
+        st.sidebar.metric("P/E Ratio", f"{pe_ratio}")
+        st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
+    else:
+        st.sidebar.warning("Fundamental data not available")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Chart Display")
+chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 AI Analyst")
+# UPDATED BUTTON: Uses callback to switch state
+st.sidebar.button("Generate Report", on_click=run_ai_analysis)
+
+# --- MAIN DASHBOARD LOGIC ---
+if ticker:
+    df = get_stock_data(ticker, period) 
+    
+    if not df.empty:
+        # Filter zero volume
+        if not df[df['Volume'] > 0].empty:
+            df = df[df['Volume'] > 0]
+        
+        current_price = df['Close'].iloc[-1]
+        
+        # Auto Sensitivity
+        valid_n = []
+        for n_scan in range(5, 45, 2): 
+            count = count_levels(df, n_scan, current_price)
+            if 3 <= count <= 6: valid_n.append(n_scan)
+        
+        optimal_n = int(sum(valid_n) / len(valid_n)) if valid_n else 10
+
+        # Sidebar Settings
+        st.sidebar.caption("Overlays")
+        show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
+        show_support = st.sidebar.checkbox("Show Support", value=True)
+        show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
+        show_bb = st.sidebar.checkbox('Show Bollinger Bands')
+        sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
+        
+        # Metrics
+        df['RSI'] = calculate_rsi(df['Close'])
+        current_volatility = df['Volatility'].iloc[-1] * 100 if not np.isnan(df['Volatility'].iloc[-1]) else 0
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Price", f"₹{current_price:.2f}", f"{((current_price - df['Close'].iloc[-2])/df['Close'].iloc[-2])*100:.2f}%")
+        col2.metric("High", f"₹{df['High'].max():.2f}")
+        col3.metric("Low", f"₹{df['Low'].min():.2f}")
+        col4.metric("Volatility", f"{current_volatility:.2f}%")
+
+        # --- AI REPORT SECTION (CONTROLS VISIBILITY) ---
+        if st.session_state.show_ai:
+            if st.button("← Back to Dashboard", type="primary"):
+                go_back()
+                st.rerun()
+
+            with st.spinner(f"Reading news & analyzing charts for {ticker}..."):
+                news_headlines = get_stock_news(ticker)
+                analysis = get_ai_analysis(ticker, df, news_headlines)
+                st.info(f"**AI Analysis:**\n\n{analysis}")
+                
+                with st.expander("📰 Read the News Headlines Used by AI"):
+                    if not news_headlines:
+                        st.write("No specific news found.")
+                    else:
+                        for i, n in enumerate(news_headlines):
+                            if isinstance(n, dict) and 'title' in n and 'link' in n:
+                                st.markdown(f"### {i+1}. [{n['title']}]({n['link']})")
+                                st.caption(f"Published by: {n.get('publisher', 'Unknown')}")
+                                st.divider()
+                            else:
+                                st.write(n)
+        
+        # --- PLOTTING LOGIC (ALWAYS VISIBLE) ---
+        # NOTE: This block is NOT inside 'if st.session_state.show_ai:'
+        
+        tab1, tab2 = st.tabs(["📈 Price Action", "📊 Technical Indicators"])
+        
+        with tab1:
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
+
+            if chart_type == "Candlestick":
+                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+            elif chart_type == "Line":
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Close", line=dict(color='#00e676')), row=1, col=1)
+            elif chart_type == "Area":
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', name="Close", line=dict(color='#2962ff')), row=1, col=1)
+            elif chart_type == "OHLC":
+                fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+            
+            if show_ema:
+                fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
+
+            if show_bb and 'Upper_Band' in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
+
+            if show_support or show_resistance:
+                 levels = []
+                 n = int(sensitivity)
+                 for i in range(n, df.shape[0]-n):
+                     if show_support and is_support(df, i, n):
+                         l = df['Low'][i]
+                         if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
+                             levels.append((df.index[i], l, "Support"))
+                     elif show_resistance and is_resistance(df, i, n):
+                         l = df['High'][i]
+                         if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
+                             levels.append((df.index[i], l, "Resistance"))
+                 for date, level, kind in levels:
+                     color = "green" if kind == "Support" else "red"
+                     fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
+
+            colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
+            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+
+            fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab2:
+            st.subheader("Momentum & Strength")
+            fig_macd = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5])
+            
+            fig_macd.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#b388ff', width=2), name='RSI'), row=1, col=1)
+            fig_macd.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
+            fig_macd.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
+            fig_macd.update_yaxes(title_text="RSI", row=1, col=1)
+            
+            if 'MACD' in df.columns:
+                colors_macd = ['#00e676' if val >= 0 else '#ff1744' for val in df['MACD'] - df['Signal_Line']]
+                fig_macd.add_trace(go.Bar(x=df.index, y=df['MACD'] - df['Signal_Line'], marker_color=colors_macd, name='MACD Hist'), row=2, col=1)
+                fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#2962ff', width=1), name='MACD'), row=2, col=1)
+                fig_macd.add_trace(go.Scatter(x=df.index, y=df['Signal_Line'], line=dict(color='#ff9100', width=1), name='Signal'), row=2, col=1)
+                fig_macd.update_yaxes(title_text="MACD", row=2, col=1)
+
+            fig_macd.update_layout(height=500, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            st.plotly_chart(fig_macd, use_container_width=True)
+    else:
+        st.error("Error loading data.")
