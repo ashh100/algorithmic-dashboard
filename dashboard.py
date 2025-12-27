@@ -86,7 +86,7 @@ def get_ai_analysis(ticker, data, news_list):
     news_context = "\n".join(news_list) if news_list else "No recent news available."
     
     # 2. Define the Model (Mistral-7B is great for this)
-    API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+    API_URL = "https://router.huggingface.co/mistralai/Mistral-7B-Instruct-v0.3"
     
     # 3. Get Token safely
     try:
