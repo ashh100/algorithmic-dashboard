@@ -115,7 +115,7 @@ def get_ai_analysis(ticker, data, news_list):
     Keep it under 150 words.
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-pro')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
