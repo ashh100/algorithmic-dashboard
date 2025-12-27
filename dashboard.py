@@ -5,17 +5,11 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import numpy as np
-import google.generativeai as genai
+import time
 
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
 st.title("Algorithmic Dashboard")
-
-# --- CONFIGURE AI ---
-try:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-except Exception as e:
-    st.error("⚠️ AI Key missing. Create .streamlit/secrets.toml to fix.")
 
 # --- UTILITY FUNCTIONS ---
 def search_tickers(query):
@@ -82,40 +76,70 @@ def get_stock_news(ticker):
     except:
         return []
 
+# --- NEW: HUGGING FACE AI INTEGRATION ---
 def get_ai_analysis(ticker, data, news_list):
+    """Calls Hugging Face Inference API for analysis."""
+    
+    # 1. Prepare Data
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     news_context = "\n".join(news_list) if news_list else "No recent news available."
-
-    prompt = f"""
-    Act as a senior Wall Street analyst. Analyze {ticker}.
     
-    1. MARKET DATA (Technical):
+    # 2. Define the Model (Mistral-7B is great for this)
+    API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+    
+    # 3. Get Token safely
+    try:
+        hf_token = st.secrets["HF_TOKEN"]
+    except:
+        return "⚠️ Error: HF_TOKEN missing in .streamlit/secrets.toml"
+
+    headers = {"Authorization": f"Bearer {hf_token}"}
+
+    # 4. Prompt Engineering (Mistral Format)
+    prompt = f"""
+    [INST] You are a senior financial analyst. Analyze {ticker} based on this data:
+    
+    TECHNICAL DATA:
     Current Price: {current_price}
-    Recent OHLCV Data:
+    Recent OHLCV:
     {recent_data}
     
-    2. NEWS CONTEXT (Fundamental):
+    NEWS HEADLINES:
     {news_context}
     
-    TASK:
-    Combine the technical trend with the news sentiment.
-    
-    OUTPUT FORMAT:
+    Task: Provide a "Trader's Take" on the trend and sentiment.
+    Format:
     - **Trend:** [Bullish/Bearish/Neutral]
-    - **Key Insight:** [One sentence summary]
-    - **News Sentiment:** [Positive/Negative/Mixed]
-    - **Verdict:** [Buy/Sell/Hold rationale]
-    
-    Keep it under 150 words.
+    - **Analysis:** [2-3 sentences combining chart and news]
+    - **Action:** [Buy/Sell/Wait]
+    [/INST]
     """
+    
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 250,
+            "temperature": 0.7,
+            "return_full_text": False
+        }
+    }
+
+    # 5. Call API with Error Handling
     try:
-        # REVERTED TO PRO MODEL FOR STABILITY
-        model = genai.GenerativeModel('gemini-pro') 
-        response = model.generate_content(prompt)
-        return response.text
+        response = requests.post(API_URL, headers=headers, json=payload)
+        result = response.json()
+        
+        # Check if model is loading (Common HF error)
+        if "error" in result:
+            if "loading" in result["error"]:
+                return "⚠️ Model is waking up... Please click 'Generate Report' again in 30 seconds."
+            return f"API Error: {result['error']}"
+            
+        return result[0]['generated_text']
+        
     except Exception as e:
-        return f"AI Error: {str(e)}"
+        return f"Connection Error: {str(e)}"
 
 # --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
@@ -199,8 +223,7 @@ if ticker:
     df = get_stock_data(ticker, period) 
     
     if not df.empty:
-        # --- CRITICAL FIX: SAFETY CHECK FOR VOLUME ---
-        # Only filter volume if it doesn't empty the dataframe
+        # Safety check for volume
         if not df[df['Volume'] > 0].empty:
             df = df[df['Volume'] > 0]
         
