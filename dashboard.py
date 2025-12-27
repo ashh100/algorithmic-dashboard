@@ -291,13 +291,44 @@ def get_stock_data(ticker, period):
 
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
-search_query = st.sidebar.text_input("Search Company", "Reliance")
+
+# --- [NEW LOGIC] Check for Portfolio Update ---
+# If the user clicked "View on Dashboard" in the portfolio, use that ticker.
+# Otherwise, default to "Reliance".
+default_search = "Reliance"
+if "ticker" in st.session_state and st.session_state["ticker"]:
+    default_search = st.session_state["ticker"]
+
+search_query = st.sidebar.text_input("Search Company", value=default_search)
+# ---------------------------------------------
 
 if search_query:
     results = search_tickers(search_query)
     if results:
-        selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
+        # --- [NEW LOGIC] Auto-Select Index ---
+        # We need to find where our desired ticker is in the list of results
+        options_keys = list(results.keys())
+        options_values = list(results.values())
+        
+        # Default to the first option (index 0)
+        select_index = 0
+        
+        # If the session_state ticker exists in these results, switch to that index
+        if "ticker" in st.session_state and st.session_state["ticker"] in options_values:
+            select_index = options_values.index(st.session_state["ticker"])
+
+        selected_label = st.sidebar.selectbox(
+            "Select Stock", 
+            options=options_keys, 
+            index=select_index
+        )
+        # -------------------------------------
+        
         ticker = results[selected_label]
+        
+        # Ensure global session state stays synced with this selection
+        st.session_state["ticker"] = ticker
+        
     else:
         st.sidebar.error("No stocks found.")
         ticker = None
@@ -340,7 +371,6 @@ chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area",
 st.sidebar.markdown("---")
 st.sidebar.subheader("🤖 AI Analyst")
 st.sidebar.button("Generate Report", on_click=run_ai_analysis)
-
 # --- MAIN DASHBOARD LOGIC ---
 if ticker:
     df = get_stock_data(ticker, period) 
@@ -521,7 +551,7 @@ if ticker:
                 # --- STEP 1: SEARCH ---
                 st.caption("Step 1: Search & Select Stock")
                 
-                # Create two columns for the search bar and the dropdown
+                # Layout: Search Bar | Dropdown & Sync Button
                 row1_1, row1_2 = st.columns(2)
                 
                 with row1_1:
@@ -532,21 +562,24 @@ if ticker:
                 
                 with row1_2:
                     if pf_search:
-                        # Uses your new Indian-only search function
                         results = search_tickers(pf_search)
                         if results:
                             selected_label = st.selectbox("Select Stock", options=results.keys())
                             chosen_ticker = results[selected_label]
+                            
+                            # [NEW FEATURE] Sync Button to update the Main Dashboard
+                            # This updates the global 'ticker' state and refreshes the app
+                            if st.button(f"⚡ View {chosen_ticker} on Dashboard"):
+                                st.session_state['ticker'] = chosen_ticker
+                                st.rerun()
                         else:
                             st.warning("No Indian stocks found.")
                             
-                # Logic to get the REAL price of the SEARCHED stock
+                # Logic to get the REAL price
                 default_price = 0.0
                 if chosen_ticker:
                     try:
-                        # Fetch live price for the *selected* portfolio stock
                         stock_info = yf.Ticker(chosen_ticker)
-                        # Try fast_info first (faster), fallback to history
                         try:
                             default_price = stock_info.fast_info.last_price
                         except:
@@ -562,16 +595,14 @@ if ticker:
                 c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
                 
                 with c1:
-                    # If we picked a ticker, use it; otherwise allow manual typing
                     val_ticker = chosen_ticker if chosen_ticker else ""
                     new_ticker = st.text_input("Ticker Symbol", value=val_ticker).upper()
                 with c2:
                     new_qty = st.number_input("Quantity", min_value=1, value=10)
                 with c3:
-                    # [FIX] The 'value' now updates to the price of the stock we just searched
                     new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(default_price), format="%.2f")
                 with c4:
-                    st.write("") # Spacer to align button
+                    st.write("") 
                     st.write("")
                     if st.button("Add"):
                         if new_ticker and new_price > 0:
@@ -583,20 +614,18 @@ if ticker:
                             st.success(f"Added {new_ticker}!")
                             st.rerun()
                         else:
-                            st.error("Invalid Ticker or Price")
+                            st.error("Invalid Ticker")
 
             # --- DISPLAY PORTFOLIO ---
             if st.session_state.portfolio:
                 pf_df = pd.DataFrame(st.session_state.portfolio)
                 
-                # Fetch Real-time prices for the table
+                # Fetch Real-time prices
                 unique_tickers = pf_df['Ticker'].unique().tolist()
                 realtime_data = {}
                 try:
                     if unique_tickers:
                         rt_quotes = yf.download(unique_tickers, period="1d", progress=False)['Close']
-                        
-                        # Handle single vs multiple ticker return structure
                         if len(unique_tickers) == 1:
                              val = rt_quotes.iloc[-1] if not rt_quotes.empty else 0
                              realtime_data[unique_tickers[0]] = float(val)
@@ -609,14 +638,14 @@ if ticker:
                 except Exception as e:
                     st.error(f"Error fetching prices: {e}")
 
-                # Calculate P/L
+                # Calculations
                 pf_df['Current Price'] = pf_df['Ticker'].map(realtime_data).fillna(0)
                 pf_df['Invested Value'] = pf_df['Quantity'] * pf_df['Buy Price']
                 pf_df['Current Value'] = pf_df['Quantity'] * pf_df['Current Price']
                 pf_df['P/L'] = pf_df['Current Value'] - pf_df['Invested Value']
                 pf_df['P/L %'] = (pf_df['P/L'] / pf_df['Invested Value']) * 100
 
-                # Totals
+                # Summary Metrics
                 total_invested = pf_df['Invested Value'].sum()
                 total_current = pf_df['Current Value'].sum()
                 total_pl = pf_df['P/L'].sum()
@@ -626,7 +655,7 @@ if ticker:
                 m2.metric("Current Value", f"₹{total_current:,.2f}")
                 m3.metric("Total P/L", f"₹{total_pl:,.2f}", delta=f"{total_pl:,.2f}")
 
-                # Table Styling
+                # Table
                 st.dataframe(pf_df.style.format({
                     "Buy Price": "₹{:.2f}", 
                     "Current Price": "₹{:.2f}",
