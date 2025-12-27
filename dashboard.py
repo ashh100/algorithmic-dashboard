@@ -532,7 +532,7 @@ if ticker:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
         # [MODIFIED] Portfolio Tracker Tab with Search Functionality
-        with tab4:
+    with tab4:
             st.subheader("💼 Portfolio Tracker")
             
             with st.expander("Add New Position", expanded=False):
@@ -541,7 +541,7 @@ if ticker:
                 row1_1, row1_2 = st.columns(2)
                 
                 with row1_1:
-                    pf_search = st.text_input("Search Ticker", placeholder="e.g. TCS, HDFC, Tata")
+                    pf_search = st.text_input("Search Ticker", placeholder="e.g. TCS, HDFC, Tata", key="pf_search_box")
                 
                 chosen_ticker = None
                 
@@ -549,10 +549,10 @@ if ticker:
                     if pf_search:
                         results = search_tickers(pf_search)
                         if results:
-                            selected_label = st.selectbox("Select Stock", options=results.keys())
+                            selected_label = st.selectbox("Select Stock", options=results.keys(), key="pf_select_box")
                             chosen_ticker = results[selected_label]
                             
-                            # Sync button (No rerun, just toast)
+                            # Sync button
                             if st.button(f"⚡ Set Dashboard to {chosen_ticker}"):
                                 st.session_state['ticker'] = chosen_ticker
                                 st.toast(f"Dashboard updated to {chosen_ticker}! Scroll up to see charts.", icon="⚡")
@@ -563,7 +563,6 @@ if ticker:
                 default_price = 0.0
                 if chosen_ticker:
                     try:
-                        # Fetch ONLY the chosen ticker's info
                         stock_info = yf.Ticker(chosen_ticker)
                         try:
                             default_price = stock_info.fast_info.last_price
@@ -580,11 +579,11 @@ if ticker:
                 
                 with c1:
                     val_ticker = chosen_ticker if chosen_ticker else ""
-                    new_ticker = st.text_input("Ticker Symbol", value=val_ticker).upper()
+                    new_ticker = st.text_input("Ticker Symbol", value=val_ticker, key="pf_ticker_input").upper()
                 with c2:
-                    new_qty = st.number_input("Quantity", min_value=1, value=10)
+                    new_qty = st.number_input("Quantity", min_value=1, value=10, key="pf_qty_input")
                 with c3:
-                    new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(default_price), format="%.2f")
+                    new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(default_price), format="%.2f", key="pf_price_input")
                 with c4:
                     st.write("") 
                     st.write("")
@@ -603,34 +602,43 @@ if ticker:
             if st.session_state.portfolio:
                 pf_df = pd.DataFrame(st.session_state.portfolio)
                 
-                # --- [FIX] ROBUST INDEPENDENT PRICING ---
-                # We loop through tickers one by one to ensure 100% accuracy 
-                # and independence from the sidebar selection.
-                portfolio_tickers = pf_df['Ticker'].unique().tolist()
-                current_prices = {}
+                # Clean the ticker column to avoid mismatch errors
+                pf_df['Ticker'] = pf_df['Ticker'].astype(str).str.strip().str.upper()
+
+                # --- [FIXED] ROBUST PRICE FETCHING ---
+                # We do NOT use yf.download(list) because it breaks when moving from 1 to 2 stocks.
+                # We use a strict loop to fetch one by one.
                 
-                for t in portfolio_tickers:
+                realtime_prices = {}
+                unique_tickers = pf_df['Ticker'].unique()
+
+                for t in unique_tickers:
                     try:
-                        # Fetch price specifically for THIS portfolio ticker
-                        # independent of whatever is in the sidebar
+                        # 1. Isolate the ticker object
                         stock = yf.Ticker(t)
                         
-                        # Try fast_info (realtime), fallback to history (1d close)
+                        # 2. Try fast_info first (realtime)
                         try:
-                            price = stock.fast_info.last_price
+                            current_price = stock.fast_info.last_price
                         except:
+                            # 3. Fallback to history (slower but reliable)
                             hist = stock.history(period="1d")
-                            price = hist['Close'].iloc[-1] if not hist.empty else 0.0
+                            if not hist.empty:
+                                current_price = hist['Close'].iloc[-1]
+                            else:
+                                current_price = 0.0
                         
-                        # Store the specific price for this specific ticker
-                        current_prices[t] = float(price) if price else 0.0
-                    except Exception:
-                        current_prices[t] = 0.0
+                        # 4. Store specifically for this ticker
+                        realtime_prices[t] = float(current_price)
+                        
+                    except Exception as e:
+                        # If fetch fails, default to 0.0 so we don't break the app
+                        realtime_prices[t] = 0.0
+
+                # --- MAPPING & CALCULATIONS ---
+                # Map the price from our dictionary to the dataframe row
+                pf_df['Current Price'] = pf_df['Ticker'].map(realtime_prices).fillna(0.0)
                 
-                # Map these specific prices back to the dataframe
-                pf_df['Current Price'] = pf_df['Ticker'].map(current_prices).fillna(0.0)
-                
-                # Calculations
                 pf_df['Invested Value'] = pf_df['Quantity'] * pf_df['Buy Price']
                 pf_df['Current Value'] = pf_df['Quantity'] * pf_df['Current Price']
                 pf_df['P/L'] = pf_df['Current Value'] - pf_df['Invested Value']
@@ -662,5 +670,5 @@ if ticker:
                     st.rerun()
             else:
                 st.info("Portfolio is empty.")
-    else:
-        st.error("Error loading data.")
+else:
+    st.error("Error loading data.")
