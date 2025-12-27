@@ -6,6 +6,8 @@ from plotly.subplots import make_subplots
 import requests
 import numpy as np
 import time
+import requests
+import xml.etree.ElementTree as ET
 
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
@@ -65,15 +67,40 @@ def count_levels(df, n, current_price):
 # --- NEWS FUNCTION ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
+    """
+    Fetches news from Google News RSS instead of yfinance.
+    This is much more reliable for Indian stocks.
+    """
     try:
-        stock = yf.Ticker(ticker)
-        news = stock.news
-        headlines = []
-        if news:
-            for n in news[:5]: 
-                headlines.append(f"- {n['title']}")
-        return headlines
-    except:
+        # 1. Clean the ticker (convert "RELIANCE.NS" -> "RELIANCE") for better search results
+        search_term = ticker.split('.')[0] 
+        
+        # 2. Use the Google News RSS feed for India (IN)
+        url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
+        
+        # 3. Fetch and Parse
+        response = requests.get(url, timeout=5)
+        root = ET.fromstring(response.content)
+        news_items = []
+        
+        # 4. Extract top 5 stories
+        for item in root.findall('.//item')[:5]:
+            title = item.find('title').text
+            link = item.find('link').text
+            # specific logic to get the publisher name cleanly
+            source = item.find('source')
+            publisher = source.text if source is not None else "Google News"
+            
+            news_items.append({
+                'title': title,
+                'link': link,
+                'publisher': publisher
+            })
+            
+        return news_items
+
+    except Exception as e:
+        print(f"News fetch error: {e}")
         return []
 
 # --- NEW: HUGGING FACE AI INTEGRATION (ROUTER + ZEPHYR FIXED) ---
