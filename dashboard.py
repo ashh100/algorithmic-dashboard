@@ -68,7 +68,7 @@ def count_levels(df, n, current_price):
                 levels.append(l)
     return len(levels)
 
-# --- NEW FUNCTION: FETCH NEWS ---
+# --- NEWS FUNCTION ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     try:
@@ -76,18 +76,15 @@ def get_stock_news(ticker):
         news = stock.news
         headlines = []
         if news:
-            for n in news[:5]: # Get top 5 headlines
+            for n in news[:5]: 
                 headlines.append(f"- {n['title']}")
         return headlines
     except:
         return []
 
 def get_ai_analysis(ticker, data, news_list):
-    """Sends chart data AND news to Gemini for a smart summary."""
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
-    
-    # Format news for the prompt
     news_context = "\n".join(news_list) if news_list else "No recent news available."
 
     prompt = f"""
@@ -103,8 +100,6 @@ def get_ai_analysis(ticker, data, news_list):
     
     TASK:
     Combine the technical trend with the news sentiment.
-    - If news is negative but price is rising, is it a bull trap?
-    - If news is positive and price is rising, is it a breakout?
     
     OUTPUT FORMAT:
     - **Trend:** [Bullish/Bearish/Neutral]
@@ -115,7 +110,8 @@ def get_ai_analysis(ticker, data, news_list):
     Keep it under 150 words.
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # REVERTED TO PRO MODEL FOR STABILITY
+        model = genai.GenerativeModel('gemini-pro') 
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
@@ -203,7 +199,11 @@ if ticker:
     df = get_stock_data(ticker, period) 
     
     if not df.empty:
-        df = df[df['Volume'] > 0]
+        # --- CRITICAL FIX: SAFETY CHECK FOR VOLUME ---
+        # Only filter volume if it doesn't empty the dataframe
+        if not df[df['Volume'] > 0].empty:
+            df = df[df['Volume'] > 0]
+        
         current_price = df['Close'].iloc[-1]
         
         # --- AUTO SENSITIVITY ENGINE ---
@@ -234,14 +234,13 @@ if ticker:
         col3.metric("Low", f"₹{df['Low'].min():.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
-        # --- AI REPORT SECTION (UPDATED) ---
+        # --- AI REPORT SECTION ---
         if run_ai:
             with st.spinner(f"Reading news & analyzing charts for {ticker}..."):
                 news_headlines = get_stock_news(ticker)
                 analysis = get_ai_analysis(ticker, df, news_headlines)
                 st.info(f"**AI Analysis:**\n\n{analysis}")
                 
-                # Show the news sources to the user
                 with st.expander("📰 Read the News Headlines Used by AI"):
                     if news_headlines:
                         for h in news_headlines:
