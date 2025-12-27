@@ -551,13 +551,11 @@ if ticker:
                 # --- STEP 1: SEARCH ---
                 st.caption("Step 1: Search & Select Stock")
                 
-                # Layout: Search Bar | Dropdown & Sync Button
                 row1_1, row1_2 = st.columns(2)
                 
                 with row1_1:
                     pf_search = st.text_input("Search Ticker", placeholder="e.g. TCS, HDFC, Tata")
                 
-                # Logic to find ticker
                 chosen_ticker = None
                 
                 with row1_2:
@@ -567,11 +565,10 @@ if ticker:
                             selected_label = st.selectbox("Select Stock", options=results.keys())
                             chosen_ticker = results[selected_label]
                             
-                            # [NEW FEATURE] Sync Button to update the Main Dashboard
-                            # This updates the global 'ticker' state and refreshes the app
-                            if st.button(f"⚡ View {chosen_ticker} on Dashboard"):
+                            # [FIX] Removed st.rerun(). Uses st.toast to confirm instead.
+                            if st.button(f"⚡ Set Dashboard to {chosen_ticker}"):
                                 st.session_state['ticker'] = chosen_ticker
-                                st.rerun()
+                                st.toast(f"Dashboard updated to {chosen_ticker}! Scroll up to see charts.", icon="⚡")
                         else:
                             st.warning("No Indian stocks found.")
                             
@@ -604,6 +601,7 @@ if ticker:
                 with c4:
                     st.write("") 
                     st.write("")
+                    # [FIX] Removed st.rerun(). The table below will update automatically.
                     if st.button("Add"):
                         if new_ticker and new_price > 0:
                             st.session_state.portfolio.append({
@@ -611,8 +609,7 @@ if ticker:
                                 "Quantity": new_qty,
                                 "Buy Price": new_price
                             })
-                            st.success(f"Added {new_ticker}!")
-                            st.rerun()
+                            st.toast(f"Added {new_ticker} to Portfolio!", icon="✅")
                         else:
                             st.error("Invalid Ticker")
 
@@ -668,7 +665,7 @@ if ticker:
                 
                 if st.button("Clear Portfolio", type="secondary"):
                     st.session_state.portfolio = []
-                    st.rerun()
+                    st.rerun() # This one needs a rerun to clear the visual table immediately
             else:
                 st.info("Portfolio is empty.")
     else:
