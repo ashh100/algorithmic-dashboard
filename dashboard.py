@@ -26,6 +26,7 @@ def go_back():
     st.session_state.show_ai = False
 
 # --- UTILITY FUNCTIONS ---
+# --- REPLACEMENT FUNCTION ---
 def search_tickers(query):
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10&newsCount=0"
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -35,9 +36,12 @@ def search_tickers(query):
         search_results = {}
         if 'quotes' in data:
             for quote in data['quotes']:
-                if 'shortname' in quote and 'symbol' in quote:
-                    label = f"{quote['symbol']} - {quote['shortname']}"
-                    search_results[label] = quote['symbol']
+                # [FIX] Filter only for NSE (.NS) and BSE (.BO) tickers
+                symbol = quote.get('symbol', '')
+                if symbol.endswith('.NS') or symbol.endswith('.BO'):
+                    shortname = quote.get('shortname', symbol)
+                    label = f"{symbol} - {shortname}"
+                    search_results[label] = symbol
         return search_results
     except:
         return {}
