@@ -5,8 +5,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import numpy as np
-import time
-import requests
 import xml.etree.ElementTree as ET
 
 # 1. Page Setup
@@ -65,66 +63,35 @@ def count_levels(df, n, current_price):
     return len(levels)
 
 # --- NEWS FUNCTION ---
-# --- NEWS FUNCTION (Fixed with User-Agent) ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
-    """
-    Fetches news from Google News RSS with a User-Agent to avoid blocking.
-    """
     try:
-        # 1. Clean the ticker (e.g., "RELIANCE.NS" -> "RELIANCE")
         search_term = ticker.split('.')[0] 
-        
-        # 2. Google News RSS URL for India
         url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
-        
-        # 3. CRITICAL FIX: Add headers so Google thinks we are a browser
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        
-        # 4. Fetch with headers
         response = requests.get(url, headers=headers, timeout=5)
-        
-        # 5. Parse XML
         root = ET.fromstring(response.content)
         news_items = []
-        
         for item in root.findall('.//item')[:5]:
             title = item.find('title').text
             link = item.find('link').text
-            
-            # Extract publisher safely
             source = item.find('source')
             publisher = source.text if source is not None else "Google News"
-            
-            news_items.append({
-                'title': title,
-                'link': link,
-                'publisher': publisher
-            })
-            
+            news_items.append({'title': title, 'link': link, 'publisher': publisher})
         return news_items
-
     except Exception as e:
-        # Print error to terminal for debugging if it fails again
-        print(f"News fetch error for {ticker}: {e}")
         return []
 
-# --- NEW: HUGGING FACE AI INTEGRATION (ROUTER + ZEPHYR FIXED) ---
-# --- NEW: GROQ AI INTEGRATION ---
-# --- NEW: GROQ AI INTEGRATION (FIXED) ---
+# --- AI INTEGRATION ---
 def get_ai_analysis(ticker, data, news_list):
-    # 1. Prepare Data
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
-    # --- FIX STARTS HERE ---
-    # Convert list of dictionaries -> formatted string for the AI
     if news_list and len(news_list) > 0:
         formatted_news = []
         for item in news_list:
-            # Handle cases where item might be a string (legacy) or dict (new)
             if isinstance(item, dict):
                 formatted_news.append(f"- {item['title']} (Source: {item['publisher']})")
             else:
@@ -132,13 +99,10 @@ def get_ai_analysis(ticker, data, news_list):
         news_context = "\n".join(formatted_news)
     else:
         news_context = "No recent news available."
-    # --- FIX ENDS HERE ---
     
-    # 2. API Setup
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
     
     try:
-        # Check for secrets safely
         if "GROQ_API_KEY" in st.secrets:
             api_key = st.secrets["GROQ_API_KEY"]
         else:
@@ -146,74 +110,62 @@ def get_ai_analysis(ticker, data, news_list):
     except Exception:
         return "⚠️ Error: Could not load secrets."
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    # 3. Prompt
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     prompt = f"""
     You are a Wall Street analyst. Analyze {ticker} based on this data:
-    
     Price: {current_price}
     Recent Data:
     {recent_data}
-    
     News:
     {news_context}
-    
     Provide a "Trader's Take":
     1. Trend (Bullish/Bearish/Neutral)
     2. One Key Reason
     3. Action (Buy/Sell/Wait)
     """
     
-    # 4. Payload
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
 
-    # 5. Call API
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
-        
         if response.status_code != 200:
              return f"API Error {response.status_code}: {response.text}"
-
         result = response.json()
         return result['choices'][0]['message']['content']
-        
     except Exception as e:
         return f"Connection Error: {str(e)}"
+
 # --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
     stock = yf.Ticker(ticker)
     df = stock.history(period=period)
-    
     if df.empty: return df
 
-    # --- EXISTING INDICATORS ---
+    # Indicators
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Pct_Change'] = df['Close'].pct_change()
     df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
     
-    # --- NEW: MACD (The Missing Piece) ---
+    # MACD
     df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
     df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
-    # --- NEW: BOLLINGER BANDS (The Missing Piece) ---
+    # Bollinger Bands
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['STD_20'] = df['Close'].rolling(window=20).std()
     df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
     df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
     
     return df
+
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     try:
@@ -280,7 +232,6 @@ if ticker:
     df = get_stock_data(ticker, period) 
     
     if not df.empty:
-        # Safety check for volume
         if not df[df['Volume'] > 0].empty:
             df = df[df['Volume'] > 0]
         
@@ -302,8 +253,9 @@ if ticker:
         show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
+        show_bb = st.sidebar.checkbox('Show Bollinger Bands')  # Checkbox added
         sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
-        show_bb = st.sidebar.checkbox('Show Bollinger Bands')
+        
         # Metrics
         df['RSI'] = calculate_rsi(df['Close'])
         current_volatility = df['Volatility'].iloc[-1] * 100 if not np.isnan(df['Volatility'].iloc[-1]) else 0
@@ -314,7 +266,7 @@ if ticker:
         col3.metric("Low", f"₹{df['Low'].min():.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
-        # --- AI REPORT SECTION ---
+        # --- AI REPORT SECTION (FIXED INDENTATION & LINKS) ---
         if run_ai:
             with st.spinner(f"Reading news & analyzing charts for {ticker}..."):
                 news_headlines = get_stock_news(ticker)
@@ -322,24 +274,26 @@ if ticker:
                 st.info(f"**AI Analysis:**\n\n{analysis}")
                 
                 with st.expander("📰 Read the News Headlines Used by AI"):
-                    if news_headlines:
-                        for h in news_headlines:
-                            st.write(h)
-                    else:
+                    if not news_headlines:
                         st.write("No specific news found.")
+                    else:
+                        for i, n in enumerate(news_headlines):
+                            if isinstance(n, dict) and 'title' in n and 'link' in n:
+                                st.markdown(f"### {i+1}. [{n['title']}]({n['link']})")
+                                st.caption(f"Published by: {n.get('publisher', 'Unknown')}")
+                                st.divider()
+                            else:
+                                st.write(n)
 
-      # --- PLOTTING LOGIC (UPGRADED) ---
-        
-        # Create Tabs for organized viewing
+        # --- PLOTTING LOGIC (TABS + OVERLAYS) ---
         tab1, tab2 = st.tabs(["📈 Price Action", "📊 Technical Indicators"])
         
         # --- TAB 1: MAIN PRICE CHART ---
         with tab1:
-            # We use 2 rows here: Price on top, Volume on bottom
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                 vertical_spacing=0.1, row_heights=[0.7, 0.3])
 
-            # 1. Candlestick / Line / Area
+            # 1. Price Chart
             if chart_type == "Candlestick":
                 fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
                                              low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
@@ -353,21 +307,20 @@ if ticker:
                 fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], 
                                       low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             
-            # 2. Moving Averages (Overlays)
+            # 2. Moving Averages
             if show_ema:
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
 
-            # 3. Bollinger Bands (New Feature)
-            # 3. Bollinger Bands (Overlay)
+            # 3. Bollinger Bands (Controlled by Checkbox)
             if show_bb and 'Upper_Band' in df.columns:
                 fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
 
-            # 4. Support & Resistance Lines
+            # 4. Support & Resistance
             if show_support or show_resistance:
                  levels = []
-                 n = int(sensitivity) # Uses your sensitivity slider
+                 n = int(sensitivity)
                  for i in range(n, df.shape[0]-n):
                      if show_support and is_support(df, i, n):
                          l = df['Low'][i]
@@ -381,27 +334,25 @@ if ticker:
                      color = "green" if kind == "Support" else "red"
                      fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
 
-            # 5. Volume Bar Chart
+            # 5. Volume
             colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
             fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
 
             fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
 
-        # --- TAB 2: MOMENTUM INDICATORS (New Feature) ---
+        # --- TAB 2: INDICATORS ---
         with tab2:
             st.subheader("Momentum & Strength")
-            
-            # MACD & RSI Subplots
             fig_macd = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5])
             
-            # 1. RSI Trace
+            # RSI
             fig_macd.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#b388ff', width=2), name='RSI'), row=1, col=1)
             fig_macd.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
             fig_macd.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
             fig_macd.update_yaxes(title_text="RSI", row=1, col=1)
             
-            # 2. MACD Histogram Trace
+            # MACD
             if 'MACD' in df.columns:
                 colors_macd = ['#00e676' if val >= 0 else '#ff1744' for val in df['MACD'] - df['Signal_Line']]
                 fig_macd.add_trace(go.Bar(x=df.index, y=df['MACD'] - df['Signal_Line'], marker_color=colors_macd, name='MACD Hist'), row=2, col=1)
@@ -411,5 +362,6 @@ if ticker:
 
             fig_macd.update_layout(height=500, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
             st.plotly_chart(fig_macd, use_container_width=True)
+
     else:
         st.error("Error loading data.")
