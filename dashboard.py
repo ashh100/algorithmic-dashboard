@@ -77,76 +77,63 @@ def get_stock_news(ticker):
         return []
 
 # --- NEW: HUGGING FACE AI INTEGRATION (ROUTER + ZEPHYR FIXED) ---
+# --- NEW: GROQ AI INTEGRATION ---
 def get_ai_analysis(ticker, data, news_list):
-    """Calls Hugging Face Inference API for analysis."""
-    
     # 1. Prepare Data
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     news_context = "\n".join(news_list) if news_list else "No recent news available."
     
-    # 2. Define the Model (Switched to Zephyr - Most Stable/Free)
-    # The 'router' URL + 'hf-inference' path is the required new format
-    API_URL = "https://router.huggingface.co/hf-inference/models/HuggingFaceH4/zephyr-7b-beta"
+    # 2. API Setup
+    # Groq offers an OpenAI-compatible API, but we use raw requests to keep it simple
+    API_URL = "https://api.groq.com/openai/v1/chat/completions"
     
-    # 3. Get Token safely
     try:
-        hf_token = st.secrets["HF_TOKEN"]
+        api_key = st.secrets["GROQ_API_KEY"]
     except:
-        return "⚠️ Error: HF_TOKEN missing in .streamlit/secrets.toml"
+        return "⚠️ Error: GROQ_API_KEY missing in .streamlit/secrets.toml"
 
-    headers = {"Authorization": f"Bearer {hf_token}"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
 
-    # 4. Prompt Engineering (Zephyr/Mistral Format)
+    # 3. Prompt
     prompt = f"""
-    <|system|>
-    You are a senior financial analyst.
-    </s>
-    <|user|>
-    Analyze {ticker} based on this data:
+    You are a Wall Street analyst. Analyze {ticker} based on this data:
     
-    Current Price: {current_price}
-    Recent OHLCV:
+    Price: {current_price}
+    Recent Data:
     {recent_data}
     
     News:
     {news_context}
     
-    Provide a "Trader's Take": Trend (Bullish/Bearish), Analysis, and Action (Buy/Sell/Wait).
-    </s>
-    <|assistant|>
+    Provide a "Trader's Take":
+    1. Trend (Bullish/Bearish/Neutral)
+    2. One Key Reason
+    3. Action (Buy/Sell/Wait)
     """
     
+    # 4. Payload (Using Llama 3 for speed and smarts)
     payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 250,
-            "temperature": 0.7,
-            "return_full_text": False
-        }
+        "model": "llama3-8b-8192",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7
     }
 
-    # 5. Call API with Debugging
+    # 5. Call API
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         
-        # If the API returns an error, show the exact message
         if response.status_code != 200:
-             return f"API Status {response.status_code}: {response.text}"
+             return f"API Error {response.status_code}: {response.text}"
 
         result = response.json()
-        
-        # Handle list vs dict response
-        if isinstance(result, list) and len(result) > 0:
-             return result[0]['generated_text']
-        elif isinstance(result, dict) and 'generated_text' in result:
-             return result['generated_text']
-        else:
-             return f"Unexpected API response: {result}"
+        return result['choices'][0]['message']['content']
         
     except Exception as e:
         return f"Connection Error: {str(e)}"
-
 # --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
