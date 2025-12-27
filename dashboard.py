@@ -1,5 +1,6 @@
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
@@ -47,11 +48,8 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- NEW: AUTO-CALCULATOR FUNCTION ---
 def count_levels(df, n, current_price):
-    # This runs the logic silently to count lines
     levels = []
-    # Optimization: Only scan every 2nd candle to speed up auto-calc
     for i in range(n, df.shape[0]-n):
         if is_support(df, i, n):
             l = df['Low'][i]
@@ -62,6 +60,22 @@ def count_levels(df, n, current_price):
             if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
                 levels.append(l)
     return len(levels)
+
+# --- DATA FETCHING ---
+@st.cache_data(ttl=300) 
+def get_stock_data(ticker, period):
+    stock = yf.Ticker(ticker)
+    df = stock.history(period=period)
+    
+    if df.empty: return df
+
+    # EMA & Volatility
+    df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    df['Pct_Change'] = df['Close'].pct_change()
+    df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
+    
+    return df
 
 # 2. Sidebar - Inputs
 st.sidebar.header("Controls")
@@ -80,94 +94,75 @@ else:
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
-# 3. Main Logic (Data Fetching FIRST)
-# ... (keep your existing imports and setup)
-
-# Add this NEW function near your other functions (like calculate_rsi)
-@st.cache_data(ttl=300)  # 👈 This creates a 5-minute memory (Time To Live)
-def get_stock_data(ticker, period):
-    stock = yf.Ticker(ticker)
-    # yfinance sometimes fails, so we retry once if empty
-    df = stock.history(period=period)
-    return df
-
-# ... (keep your sidebar code) ...
+# --- NEW: CHART STYLE SELECTOR ---
+st.sidebar.subheader("Chart Display")
+chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
 
 # 3. Main Dashboard Logic
 if ticker:
-    # CHANGE THIS PART to use the new cached function
     df = get_stock_data(ticker, period) 
     
     if not df.empty:
-        # ... (rest of your code stays exactly the same)
         df = df[df['Volume'] > 0]
         current_price = df['Close'].iloc[-1]
         
-        # --- SMART RECOMMENDATION ENGINE ---
-        # We scan sensitivity (n) from 5 to 40 to find where we get 3-6 lines
+        # Recommendation Engine
         valid_n = []
-        # Run a quick scan (step 3 to save performance)
         for n_scan in range(5, 45, 2): 
             count = count_levels(df, n_scan, current_price)
-            if 3 <= count <= 6:
-                valid_n.append(n_scan)
+            if 3 <= count <= 6: valid_n.append(n_scan)
         
-        if valid_n:
-            rec_msg = f"💡 Rec. Range: {min(valid_n)} - {max(valid_n)}"
-            rec_color = "green"
-        else:
-            rec_msg = "⚠️ Market is noisy. Try > 30"
-            rec_color = "orange"
+        rec_msg = f"💡 Rec. Range: {min(valid_n)} - {max(valid_n)}" if valid_n else "⚠️ Market is noisy"
+        rec_color = "green" if valid_n else "orange"
 
-        # --- SIDEBAR SETTINGS (Rendered AFTER data check) ---
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Technical Settings")
-        
-        st.sidebar.caption("Chart Overlays")
-        show_price = st.sidebar.checkbox("Show Price", value=True)
-        show_sma = st.sidebar.checkbox("Show SMA", value=True)
-        show_support = st.sidebar.checkbox("Show Support (Grn)", value=True)
-        show_resistance = st.sidebar.checkbox("Show Resistance (Red)", value=True)
-
-        # The Recommendation Message
+        # Sidebar Settings
         st.sidebar.markdown(f":{rec_color}[{rec_msg}]")
-        
-        sensitivity = st.sidebar.number_input(
-            "Sensitivity (Window Size)", 
-            min_value=2, 
-            max_value=50, 
-            value=10, 
-            step=1
-        )
+        st.sidebar.caption("Overlays")
+        show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
+        show_support = st.sidebar.checkbox("Show Support", value=True)
+        show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
+        sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, 10)
 
-        # --- DATA PROCESSING & PLOTTING ---
-        df['SMA_50'] = df['Close'].rolling(window=50).mean()
+        # Metrics
         df['RSI'] = calculate_rsi(df['Close'])
-        prev_close = df['Close'].iloc[-2]
-        day_change = ((current_price - prev_close) / prev_close) * 100
+        current_volatility = df['Volatility'].iloc[-1] * 100 if not np.isnan(df['Volatility'].iloc[-1]) else 0
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Current Price", f"₹{current_price:.2f}", f"{day_change:.2f}%")
-        col2.metric("Day High", f"₹{df['High'].max():.2f}")
-        col3.metric("Day Low", f"₹{df['Low'].min():.2f}")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Price", f"₹{current_price:.2f}", f"{((current_price - df['Close'].iloc[-2])/df['Close'].iloc[-2])*100:.2f}%")
+        col2.metric("High", f"₹{df['High'].max():.2f}")
+        col3.metric("Low", f"₹{df['Low'].min():.2f}")
+        col4.metric("Volatility", f"{current_volatility:.2f}%")
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                            vertical_spacing=0.05, row_heights=[0.7, 0.3])
+        # --- PLOTTING LOGIC ---
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
+                            row_heights=[0.6, 0.2, 0.2], 
+                            subplot_titles=("Price Action", "Volume", "RSI"))
 
-        # 1. Price
-        if show_price:
-            fig.add_trace(go.Candlestick(x=df.index,
-                            open=df['Open'], high=df['High'],
-                            low=df['Low'], close=df['Close'],
-                            name="Price"), row=1, col=1)
-        # 2. SMA
-        if show_sma:
-            fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], mode='lines', 
-                                     name='50-Day SMA', line=dict(color='orange')), row=1, col=1)
+        # 1. Main Chart (Dynamic Type)
+        if chart_type == "Candlestick":
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
+                                         low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
         
-        # 3. Levels
-        levels = []
+        elif chart_type == "Line":
+            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', 
+                                     name="Close", line=dict(color='#00e676')), row=1, col=1)
+            
+        elif chart_type == "Area":
+            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', 
+                                     name="Close", line=dict(color='#2962ff')), row=1, col=1)
+            
+        elif chart_type == "OHLC":
+            fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], 
+                                  low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+
+        # 2. Overlays (Work on all charts)
+        if show_ema:
+            fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#00e676', width=1), name='EMA 20'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
+        
+        # 3. Support/Resistance (Only logic calculation needed)
         if show_support or show_resistance:
+            levels = []
             n = int(sensitivity)
             for i in range(n, df.shape[0]-n):
                 if show_support and is_support(df, i, n):
@@ -178,20 +173,19 @@ if ticker:
                     l = df['High'][i]
                     if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
                         levels.append((df.index[i], l, "Resistance"))
-
+            
             for date, level, kind in levels:
                 color = "green" if kind == "Support" else "red"
-                fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1)
+                fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
 
-        # 4. RSI
-        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', 
-                                 line=dict(color='purple', width=2)), row=2, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+        # 4. Volume & RSI
+        colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#b388ff'), name='RSI'), row=3, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
 
-        fig.update_layout(title=f"{ticker} Analysis", height=700, 
-                          xaxis_rangeslider_visible=False,
-                          legend=dict(x=1.02, y=1))
+        fig.update_layout(height=800, xaxis_rangeslider_visible=False, template="plotly_dark", showlegend=False, margin=dict(l=50, r=50, t=50, b=50))
         st.plotly_chart(fig, use_container_width=True)
 
     else:
