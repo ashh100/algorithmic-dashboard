@@ -72,6 +72,28 @@ def count_levels(df, n, current_price):
                 levels.append(l)
     return len(levels)
 
+# --- NEW FUNCTION: MARKET COMPARISON ---
+@st.cache_data(ttl=3600)
+def get_market_comparison(ticker, period):
+    try:
+        # Compare against Nifty 50 (^NSEI)
+        tickers = [ticker, "^NSEI"]
+        data = yf.download(tickers, period=period)['Close']
+        
+        # Handle MultiIndex if it returns multiple columns
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+            
+        # Normalize: (Price / Start_Price - 1) * 100
+        normalized = (data / data.iloc[0] - 1) * 100
+        
+        # Calculate Correlation
+        correlation = data.corr().iloc[0, 1]
+        
+        return normalized, correlation
+    except Exception as e:
+        return None, 0
+
 # --- NEWS FUNCTION ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
@@ -92,7 +114,7 @@ def get_stock_news(ticker):
             news_items.append({'title': title, 'link': link, 'publisher': publisher})
         return news_items
     except Exception as e:
-        print(f"News fetch error for {ticker}: {e}")
+        # print(f"News fetch error for {ticker}: {e}")
         return []
 
 # --- AI ANALYST FUNCTION ---
@@ -191,12 +213,12 @@ search_query = st.sidebar.text_input("Search Company", "Tata")
 
 if search_query:
     results = search_tickers(search_query)
-    ticker = results[list(results.keys())[0]] if results else None
     if results:
         selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
         ticker = results[selected_label]
     else:
         st.sidebar.error("No stocks found.")
+        ticker = None
 else:
     ticker = None
 
@@ -243,13 +265,9 @@ if ticker:
         
         current_price = df['Close'].iloc[-1]
         
-        # Auto Sensitivity
-        valid_n = []
-        for n_scan in range(5, 45, 2): 
-            count = count_levels(df, n_scan, current_price)
-            if 3 <= count <= 6: valid_n.append(n_scan)
-        
-        optimal_n = int(sum(valid_n) / len(valid_n)) if valid_n else 10
+        # --- FIX: Removed the "Auto Sensitivity" Loop to prevent dashboard crash ---
+        # Instead of calculating it 20 times, we default to 10 or let the user choose.
+        optimal_n = 10 
 
         # Sidebar Settings
         st.sidebar.caption("Overlays")
@@ -295,7 +313,8 @@ if ticker:
         # --- PLOTTING LOGIC (ALWAYS VISIBLE) ---
         # NOTE: This block is NOT inside 'if st.session_state.show_ai:'
         
-        tab1, tab2 = st.tabs(["📈 Price Action", "📊 Technical Indicators"])
+        # --- UPDATE: Added Tab 3 for Sector Comparison ---
+        tab1, tab2, tab3 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison"])
         
         with tab1:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
@@ -357,5 +376,30 @@ if ticker:
 
             fig_macd.update_layout(height=500, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
             st.plotly_chart(fig_macd, use_container_width=True)
+
+        # --- NEW TAB 3 CONTENT ---
+        with tab3:
+            st.subheader(f"Performance: {ticker} vs Nifty 50")
+            comp_data, correlation = get_market_comparison(ticker, period)
+            
+            if comp_data is not None and not comp_data.empty:
+                # Metrics
+                c1, c2 = st.columns([1, 3])
+                c1.metric("Correlation", f"{correlation:.2f}")
+                if correlation > 0.7: c1.success("Moves with Market")
+                elif correlation < 0.3: c1.warning("Moves Independently")
+                
+                # Comparison Plot
+                fig_comp = go.Figure()
+                # Plot Stock
+                fig_comp.add_trace(go.Scatter(x=comp_data.index, y=comp_data.iloc[:, 0], name=ticker, line=dict(color='#00e676', width=2)))
+                # Plot Market
+                fig_comp.add_trace(go.Scatter(x=comp_data.index, y=comp_data.iloc[:, 1], name='Nifty 50', line=dict(color='white', width=1, dash='dash')))
+                
+                fig_comp.update_layout(title="Relative Return (%)", template="plotly_dark", height=500, yaxis_title="% Change", margin=dict(l=0, r=0, t=0, b=0))
+                st.plotly_chart(fig_comp, use_container_width=True)
+            else:
+                st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
+
     else:
         st.error("Error loading data.")
