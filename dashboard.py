@@ -15,7 +15,7 @@ st.title("Algorithmic Dashboard")
 if 'show_ai' not in st.session_state:
     st.session_state.show_ai = False
 
-# [NEW] Initialize Portfolio in Session State
+# Initialize Portfolio in Session State
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
@@ -401,7 +401,6 @@ if ticker:
                                 st.write(n)
         
         # --- PLOTTING LOGIC ---
-        # [MODIFIED] Added "Portfolio" to tabs
         tab1, tab2, tab3, tab4 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison", "💼 Portfolio"])
         
         with tab1:
@@ -510,29 +509,64 @@ if ticker:
             else:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
-        # [NEW] Portfolio Tracker Tab
+        # [MODIFIED] Portfolio Tracker Tab with Search Functionality
         with tab4:
             st.subheader("💼 Portfolio Tracker")
             
-            # Input Form
             with st.expander("Add New Position", expanded=False):
-                c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-                with c1:
-                    new_ticker = st.text_input("Ticker Symbol", value=ticker if ticker else "").upper()
-                with c2:
+                # Row 1: Search & Select
+                st.caption("Step 1: Search & Select Stock")
+                row1_1, row1_2 = st.columns(2)
+                
+                with row1_1:
+                    pf_search_term = st.text_input("Search Company Name", placeholder="e.g., Tata, Apple, Reliance")
+                
+                chosen_ticker = None
+                
+                with row1_2:
+                    if pf_search_term:
+                        search_res = search_tickers(pf_search_term) 
+                        if search_res:
+                            # Search returns {Label: Symbol}
+                            sel_key = st.selectbox("Select Correct Ticker", options=search_res.keys())
+                            chosen_ticker = search_res[sel_key]
+                        else:
+                            st.warning("No matches found. Try a different name.")
+                    else:
+                         if ticker:
+                            st.info(f"Defaulting to: {ticker} (Type on left to search others)")
+                            chosen_ticker = ticker
+                
+                st.divider()
+
+                # Row 2: Details & Add
+                st.caption("Step 2: Confirm Details")
+                r2_col1, r2_col2, r2_col3, r2_col4 = st.columns([2, 2, 2, 1])
+                
+                with r2_col1:
+                    # Auto-filled from search, but editable
+                    final_ticker_val = chosen_ticker if chosen_ticker else ""
+                    new_ticker = st.text_input("Ticker Symbol", value=final_ticker_val).upper()
+                with r2_col2:
                     new_qty = st.number_input("Quantity", min_value=1, value=10)
-                with c3:
-                    new_price = st.number_input("Avg Buy Price", min_value=0.1, value=current_price)
-                with c4:
+                with r2_col3:
+                    # Attempt to fill price if the chosen ticker matches the main dashboard
+                    fill_price = current_price if (ticker and new_ticker == ticker) else 0.0
+                    new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(fill_price))
+                with r2_col4:
                     st.write("") # Spacer
                     st.write("")
                     if st.button("Add"):
-                        st.session_state.portfolio.append({
-                            "Ticker": new_ticker,
-                            "Quantity": new_qty,
-                            "Buy Price": new_price
-                        })
-                        st.rerun()
+                        if new_ticker:
+                            st.session_state.portfolio.append({
+                                "Ticker": new_ticker,
+                                "Quantity": new_qty,
+                                "Buy Price": new_price
+                            })
+                            st.success(f"Added {new_ticker}!")
+                            st.rerun()
+                        else:
+                            st.error("Ticker is required.")
 
             # Display Portfolio
             if st.session_state.portfolio:
@@ -542,11 +576,8 @@ if ticker:
                 unique_tickers = pf_df['Ticker'].unique().tolist()
                 realtime_data = {}
                 try:
-                    # Batch fetch for speed
                     rt_quotes = yf.download(unique_tickers, period="1d", progress=False)['Close']
-                    # Handle if only 1 ticker (returns Series) vs multiple (returns DF)
                     if len(unique_tickers) == 1:
-                        # yf.download structure varies by version, handling safe access
                         val = rt_quotes.iloc[-1] if not rt_quotes.empty else 0
                         realtime_data[unique_tickers[0]] = float(val)
                     else:
