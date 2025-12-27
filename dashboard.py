@@ -23,6 +23,11 @@ if 'portfolio' not in st.session_state:
 if "ticker" not in st.session_state:
     st.session_state["ticker"] = "RELIANCE.NS"
 
+# Initialize Search Key Wrapper
+# We use this to manually clear the sidebar search box safely
+if "search_key_trigger" not in st.session_state:
+    st.session_state.search_key_trigger = 0
+
 def run_ai_analysis():
     st.session_state.show_ai = True
 
@@ -294,9 +299,11 @@ def get_stock_data(ticker, period):
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
 
-# [CRITICAL FIX] We bind the text input to a key 'sidebar_search'.
-# This allows us to clear it programmatically from the Portfolio tab.
-search_query = st.sidebar.text_input("Search Company", key="sidebar_search")
+# [CRITICAL FIX] DYNAMIC KEY
+# We effectively "reset" the widget by changing its key whenever 'search_key_trigger' increments.
+# This avoids the "StreamlitAPIException" because we are creating a *new* widget instead of modifying an existing one.
+search_key = f"sidebar_search_{st.session_state.search_key_trigger}"
+search_query = st.sidebar.text_input("Search Company", key=search_key)
 
 # Logic to find ticker
 if search_query:
@@ -309,7 +316,6 @@ if search_query:
         st.sidebar.error("No stocks found.")
         ticker = None
 else:
-    # If Sidebar search is empty, fallback to the Global Session State
     if "ticker" not in st.session_state:
         st.session_state["ticker"] = "RELIANCE.NS"
     ticker = st.session_state["ticker"]
@@ -553,8 +559,9 @@ if ticker:
                             # SYNC BUTTON
                             if st.button(f"⚡ Set Dashboard to {chosen_ticker}"):
                                 st.session_state['ticker'] = chosen_ticker
-                                # [CRITICAL] Clear sidebar search so it doesn't override this
-                                st.session_state['sidebar_search'] = ""
+                                # [CRITICAL FIX] 
+                                # Increment trigger to reset the sidebar search widget entirely
+                                st.session_state.search_key_trigger += 1
                                 st.toast(f"Dashboard updated to {chosen_ticker}! Scroll up to see charts.", icon="⚡")
                                 st.rerun()
                         else:
@@ -601,8 +608,10 @@ if ticker:
                             })
                             
                             st.session_state['ticker'] = new_ticker
-                            # [CRITICAL] Clear sidebar search here too
-                            st.session_state['sidebar_search'] = ""
+                            
+                            # [CRITICAL FIX]
+                            # Same here: Reset sidebar search safely
+                            st.session_state.search_key_trigger += 1
                             
                             st.toast(f"Added {new_ticker} to Portfolio & Updated Dashboard!", icon="✅")
                             st.rerun() 
