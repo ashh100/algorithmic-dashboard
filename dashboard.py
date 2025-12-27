@@ -362,7 +362,7 @@ if ticker:
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
         show_patterns = st.sidebar.checkbox("Show Patterns (Hammer/Engulfing)", value=False)
         show_bb = st.sidebar.checkbox('Show Bollinger Bands')
-        show_range = st.sidebar.checkbox('Show Period High/Low Tags', value=True)
+        
         
         sensitivity = st.sidebar.number_input("Sensitivity (Auto-Optimized)", 
                                               min_value=2, max_value=50, 
@@ -432,31 +432,7 @@ if ticker:
                 fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             
             # --- VISIBILITY FIX (TAGS + RANGE LINES) ---
-            if show_range:
-                # High Label
-                fig.add_annotation(
-                    x=high_date, y=period_high,
-                    text=f"High: {period_high:.2f}",
-                    showarrow=True, arrowhead=2, arrowcolor="white",
-                    ax=0, ay=-40,
-                    font=dict(color="white", size=11, family="Arial Black"),
-                    bgcolor="rgba(200, 0, 0, 0.6)", bordercolor="red", borderwidth=1,
-                    row=1, col=1
-                )
-                # Low Label
-                fig.add_annotation(
-                    x=low_date, y=period_low,
-                    text=f"Low: {period_low:.2f}",
-                    showarrow=True, arrowhead=2, arrowcolor="white",
-                    ax=0, ay=40,
-                    font=dict(color="white", size=11, family="Arial Black"),
-                    bgcolor="rgba(0, 150, 0, 0.6)", bordercolor="green", borderwidth=1,
-                    row=1, col=1
-                )
-                # Range Lines
-                fig.add_hline(y=period_high, line_dash="longdash", line_color="rgba(255, 0, 0, 0.3)", row=1, col=1)
-                fig.add_hline(y=period_low, line_dash="longdash", line_color="rgba(0, 255, 0, 0.3)", row=1, col=1)
-
+           
             if show_ema:
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
