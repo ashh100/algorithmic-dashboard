@@ -8,7 +8,7 @@ import numpy as np
 import google.generativeai as genai
 
 # 1. Page Setup
-st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
+st.set_page_config(layout="wide", page_title="Ashwath's Terminal")
 st.title("Algorithmic Dashboard")
 
 # --- CONFIGURE AI ---
