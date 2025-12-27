@@ -303,7 +303,7 @@ if ticker:
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
         sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
-
+        show_bb = st.sidebar.checkbox('Show Bollinger Bands')
         # Metrics
         df['RSI'] = calculate_rsi(df['Close'])
         current_volatility = df['Volatility'].iloc[-1] * 100 if not np.isnan(df['Volatility'].iloc[-1]) else 0
@@ -359,7 +359,8 @@ if ticker:
                 fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
 
             # 3. Bollinger Bands (New Feature)
-            if 'Upper_Band' in df.columns:
+            # 3. Bollinger Bands (Overlay)
+            if show_bb and 'Upper_Band' in df.columns:
                 fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
 
