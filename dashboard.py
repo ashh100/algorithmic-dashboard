@@ -536,7 +536,6 @@ if ticker:
             st.subheader("💼 Portfolio Tracker")
             
             with st.expander("Add New Position", expanded=False):
-                # --- STEP 1: SEARCH ---
                 st.caption("Step 1: Search & Select Stock")
                 
                 row1_1, row1_2 = st.columns(2)
@@ -553,17 +552,18 @@ if ticker:
                             selected_label = st.selectbox("Select Stock", options=results.keys())
                             chosen_ticker = results[selected_label]
                             
-                            # [FIX] Removed st.rerun(). Uses st.toast to confirm instead.
+                            # Sync button (No rerun, just toast)
                             if st.button(f"⚡ Set Dashboard to {chosen_ticker}"):
                                 st.session_state['ticker'] = chosen_ticker
                                 st.toast(f"Dashboard updated to {chosen_ticker}! Scroll up to see charts.", icon="⚡")
                         else:
                             st.warning("No Indian stocks found.")
                             
-                # Logic to get the REAL price
+                # Logic to get the default price for the ADD form
                 default_price = 0.0
                 if chosen_ticker:
                     try:
+                        # Fetch ONLY the chosen ticker's info
                         stock_info = yf.Ticker(chosen_ticker)
                         try:
                             default_price = stock_info.fast_info.last_price
@@ -574,7 +574,6 @@ if ticker:
 
                 st.divider()
 
-                # --- STEP 2: CONFIRM DETAILS ---
                 st.caption("Step 2: Confirm Details")
                 
                 c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
@@ -589,7 +588,6 @@ if ticker:
                 with c4:
                     st.write("") 
                     st.write("")
-                    # [FIX] Removed st.rerun(). The table below will update automatically.
                     if st.button("Add"):
                         if new_ticker and new_price > 0:
                             st.session_state.portfolio.append({
@@ -605,26 +603,34 @@ if ticker:
             if st.session_state.portfolio:
                 pf_df = pd.DataFrame(st.session_state.portfolio)
                 
-                # Fetch Real-time prices
-                unique_tickers = pf_df['Ticker'].unique().tolist()
-                realtime_data = {}
-                try:
-                    if unique_tickers:
-                        rt_quotes = yf.download(unique_tickers, period="1d", progress=False)['Close']
-                        if len(unique_tickers) == 1:
-                             val = rt_quotes.iloc[-1] if not rt_quotes.empty else 0
-                             realtime_data[unique_tickers[0]] = float(val)
-                        else:
-                             for t in unique_tickers:
-                                 if t in rt_quotes.columns:
-                                     realtime_data[t] = float(rt_quotes[t].iloc[-1])
-                                 else:
-                                     realtime_data[t] = 0
-                except Exception as e:
-                    st.error(f"Error fetching prices: {e}")
-
+                # --- [FIX] ROBUST INDEPENDENT PRICING ---
+                # We loop through tickers one by one to ensure 100% accuracy 
+                # and independence from the sidebar selection.
+                portfolio_tickers = pf_df['Ticker'].unique().tolist()
+                current_prices = {}
+                
+                for t in portfolio_tickers:
+                    try:
+                        # Fetch price specifically for THIS portfolio ticker
+                        # independent of whatever is in the sidebar
+                        stock = yf.Ticker(t)
+                        
+                        # Try fast_info (realtime), fallback to history (1d close)
+                        try:
+                            price = stock.fast_info.last_price
+                        except:
+                            hist = stock.history(period="1d")
+                            price = hist['Close'].iloc[-1] if not hist.empty else 0.0
+                        
+                        # Store the specific price for this specific ticker
+                        current_prices[t] = float(price) if price else 0.0
+                    except Exception:
+                        current_prices[t] = 0.0
+                
+                # Map these specific prices back to the dataframe
+                pf_df['Current Price'] = pf_df['Ticker'].map(current_prices).fillna(0.0)
+                
                 # Calculations
-                pf_df['Current Price'] = pf_df['Ticker'].map(realtime_data).fillna(0)
                 pf_df['Invested Value'] = pf_df['Quantity'] * pf_df['Buy Price']
                 pf_df['Current Value'] = pf_df['Quantity'] * pf_df['Current Price']
                 pf_df['P/L'] = pf_df['Current Value'] - pf_df['Invested Value']
@@ -653,7 +659,7 @@ if ticker:
                 
                 if st.button("Clear Portfolio", type="secondary"):
                     st.session_state.portfolio = []
-                    st.rerun() # This one needs a rerun to clear the visual table immediately
+                    st.rerun()
             else:
                 st.info("Portfolio is empty.")
     else:
