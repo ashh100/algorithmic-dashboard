@@ -77,6 +77,7 @@ def get_stock_news(ticker):
         return []
 
 # --- NEW: HUGGING FACE AI INTEGRATION ---
+# --- NEW: HUGGING FACE AI INTEGRATION (FIXED & STABLE) ---
 def get_ai_analysis(ticker, data, news_list):
     """Calls Hugging Face Inference API for analysis."""
     
@@ -85,9 +86,9 @@ def get_ai_analysis(ticker, data, news_list):
     current_price = data['Close'].iloc[-1]
     news_context = "\n".join(news_list) if news_list else "No recent news available."
     
-    # 2. Define the Model (Mistral-7B is great for this)
-    # Corrected URL structure for the new Hugging Face Router
-    API_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.3"
+    # 2. Define the Model (Switching to v0.2 which is NOT gated)
+    # This URL is the standard, stable free tier endpoint.
+    API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
     
     # 3. Get Token safely
     try:
@@ -97,23 +98,18 @@ def get_ai_analysis(ticker, data, news_list):
 
     headers = {"Authorization": f"Bearer {hf_token}"}
 
-    # 4. Prompt Engineering (Mistral Format)
+    # 4. Prompt Engineering
     prompt = f"""
-    [INST] You are a senior financial analyst. Analyze {ticker} based on this data:
+    [INST] You are a financial analyst. Analyze {ticker} based on this data:
     
-    TECHNICAL DATA:
     Current Price: {current_price}
-    Recent OHLCV:
+    Recent Data:
     {recent_data}
     
-    NEWS HEADLINES:
+    News:
     {news_context}
     
-    Task: Provide a "Trader's Take" on the trend and sentiment.
-    Format:
-    - **Trend:** [Bullish/Bearish/Neutral]
-    - **Analysis:** [2-3 sentences combining chart and news]
-    - **Action:** [Buy/Sell/Wait]
+    Give a 3-sentence summary: Trend (Bullish/Bearish), Key Reason, and Action (Buy/Sell/Wait).
     [/INST]
     """
     
@@ -126,18 +122,23 @@ def get_ai_analysis(ticker, data, news_list):
         }
     }
 
-    # 5. Call API with Error Handling
+    # 5. Call API with BETTER Error Handling
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
+        
+        # If the API returns an error (like 404 or 503), show the text
+        if response.status_code != 200:
+             return f"API Error {response.status_code}: {response.text}"
+
         result = response.json()
         
-        # Check if model is loading (Common HF error)
-        if "error" in result:
-            if "loading" in result["error"]:
-                return "⚠️ Model is waking up... Please click 'Generate Report' again in 30 seconds."
-            return f"API Error: {result['error']}"
-            
-        return result[0]['generated_text']
+        # Handle list vs dict response
+        if isinstance(result, list) and len(result) > 0:
+             return result[0]['generated_text']
+        elif isinstance(result, dict) and 'generated_text' in result:
+             return result['generated_text']
+        else:
+             return f"Unexpected format: {result}"
         
     except Exception as e:
         return f"Connection Error: {str(e)}"
