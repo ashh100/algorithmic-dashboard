@@ -59,18 +59,41 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def count_levels(df, n, current_price):
-    levels = []
-    for i in range(n, df.shape[0]-n):
-        if is_support(df, i, n):
-            l = df['Low'][i]
-            if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
-                levels.append(l)
-        elif is_resistance(df, i, n):
-            l = df['High'][i]
-            if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
-                levels.append(l)
-    return len(levels)
+# --- NEW FUNCTION: ROBUST FUNDAMENTALS FETCH ---
+@st.cache_data(ttl=86400) 
+def get_company_info(ticker):
+    """
+    Attempts to fetch company info. If the standard .info fails (common with non-US stocks),
+    it falls back to .fast_info to at least provide Market Cap.
+    """
+    stock = yf.Ticker(ticker)
+    info = None
+    
+    # 1. Try standard info (Sector, PE, Desc)
+    try:
+        info = stock.info
+    except Exception:
+        pass # Ignore failure, move to fallback
+
+    # 2. If info is missing or empty, create a fallback dict
+    if not info:
+        info = {}
+        
+    # 3. If Market Cap is missing (key indicator of failure), try fast_info
+    if 'marketCap' not in info:
+        try:
+            fast = stock.fast_info
+            if fast and fast.market_cap:
+                info['marketCap'] = fast.market_cap
+                # Fill missing fields with N/A so the UI doesn't crash
+                if 'sector' not in info: info['sector'] = "N/A (Data Unavailable)"
+                if 'trailingPE' not in info: info['trailingPE'] = "N/A"
+                if 'dividendYield' not in info: info['dividendYield'] = 0
+        except Exception:
+            pass # Truly no data available
+
+    # Only return None if we truly have nothing
+    return info if ('marketCap' in info or 'sector' in info) else None
 
 # --- NEW FUNCTION: MARKET COMPARISON ---
 @st.cache_data(ttl=3600)
@@ -114,7 +137,6 @@ def get_stock_news(ticker):
             news_items.append({'title': title, 'link': link, 'publisher': publisher})
         return news_items
     except Exception as e:
-        # print(f"News fetch error for {ticker}: {e}")
         return []
 
 # --- AI ANALYST FUNCTION ---
@@ -199,14 +221,6 @@ def get_stock_data(ticker, period):
     
     return df
 
-@st.cache_data(ttl=86400) 
-def get_company_info(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        return stock.info
-    except:
-        return None
-
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
 search_query = st.sidebar.text_input("Search Company", "Tata")
@@ -227,20 +241,28 @@ period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], i
 if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader("🏢 Fundamentals")
+    # UPDATED: Uses robust function to prevent sidebar errors
     info = get_company_info(ticker)
+    
     if info:
         sector = info.get('sector', 'N/A')
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
         div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         
+        # Handle N/A P/E ratios gracefully
+        if pe_ratio != 'N/A':
+            pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
+        else:
+            pe_str = "N/A"
+
         if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
         elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
         else: mcap_str = f"₹{market_cap/1e6:.2f}M"
 
         st.sidebar.info(f"**Sector:** {sector}")
         st.sidebar.metric("Market Cap", mcap_str)
-        st.sidebar.metric("P/E Ratio", f"{pe_ratio}")
+        st.sidebar.metric("P/E Ratio", pe_str)
         st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
     else:
         st.sidebar.warning("Fundamental data not available")
