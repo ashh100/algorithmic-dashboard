@@ -59,60 +59,85 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- NEW FUNCTION: ROBUST FUNDAMENTALS FETCH ---
+# --- NEW: AUTO-SENSITIVITY CALCULATOR ---
+def calculate_optimal_sensitivity(df):
+    """
+    Iterates through sensitivity values to find one that produces 
+    3-6 support/resistance lines.
+    """
+    # Test values in order of preference (Standard -> Smooth -> Granular)
+    test_values = [20, 15, 25, 30, 10, 35, 40]
+    best_n = 20
+    min_dist_to_ideal = float('inf')
+    
+    current_price = df['Close'].iloc[-1]
+    
+    for n in test_values:
+        level_count = 0
+        levels = []
+        
+        # Fast scan for levels
+        for i in range(n, df.shape[0]-n):
+            if is_support(df, i, n):
+                l = df['Low'][i]
+                # Check proximity to existing levels
+                if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
+                    levels.append(l)
+                    level_count += 1
+            elif is_resistance(df, i, n):
+                l = df['High'][i]
+                if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
+                    levels.append(l)
+                    level_count += 1
+        
+        # Ideal range is 3 to 5 lines
+        if 3 <= level_count <= 5:
+            return n # Found perfect match, return immediately
+        
+        # Otherwise, track which n gets us closest to 4 lines
+        dist = abs(level_count - 4)
+        if dist < min_dist_to_ideal:
+            min_dist_to_ideal = dist
+            best_n = n
+            
+    return best_n
+
+# --- ROBUST FUNDAMENTALS FETCH ---
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
-    """
-    Attempts to fetch company info. If the standard .info fails (common with non-US stocks),
-    it falls back to .fast_info to at least provide Market Cap.
-    """
     stock = yf.Ticker(ticker)
     info = None
-    
-    # 1. Try standard info (Sector, PE, Desc)
     try:
         info = stock.info
     except Exception:
-        pass # Ignore failure, move to fallback
+        pass 
 
-    # 2. If info is missing or empty, create a fallback dict
     if not info:
         info = {}
         
-    # 3. If Market Cap is missing (key indicator of failure), try fast_info
     if 'marketCap' not in info:
         try:
             fast = stock.fast_info
             if fast and fast.market_cap:
                 info['marketCap'] = fast.market_cap
-                # Fill missing fields with N/A so the UI doesn't crash
                 if 'sector' not in info: info['sector'] = "N/A (Data Unavailable)"
                 if 'trailingPE' not in info: info['trailingPE'] = "N/A"
                 if 'dividendYield' not in info: info['dividendYield'] = 0
         except Exception:
-            pass # Truly no data available
+            pass
 
-    # Only return None if we truly have nothing
     return info if ('marketCap' in info or 'sector' in info) else None
 
-# --- NEW FUNCTION: MARKET COMPARISON ---
+# --- MARKET COMPARISON ---
 @st.cache_data(ttl=3600)
 def get_market_comparison(ticker, period):
     try:
-        # Compare against Nifty 50 (^NSEI)
         tickers = [ticker, "^NSEI"]
         data = yf.download(tickers, period=period)['Close']
-        
-        # Handle MultiIndex if it returns multiple columns
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-            
-        # Normalize: (Price / Start_Price - 1) * 100
         normalized = (data / data.iloc[0] - 1) * 100
-        
-        # Calculate Correlation
         correlation = data.corr().iloc[0, 1]
-        
         return normalized, correlation
     except Exception as e:
         return None, 0
@@ -123,9 +148,7 @@ def get_stock_news(ticker):
     try:
         search_term = ticker.split('.')[0] 
         url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         root = ET.fromstring(response.content)
         news_items = []
@@ -144,7 +167,7 @@ def get_ai_analysis(ticker, data, news_list):
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
-    if news_list and len(news_list) > 0:
+    if news_list:
         formatted_news = []
         for item in news_list:
             if isinstance(item, dict):
@@ -156,7 +179,6 @@ def get_ai_analysis(ticker, data, news_list):
         news_context = "No recent news available."
     
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    
     try:
         if "GROQ_API_KEY" in st.secrets:
             api_key = st.secrets["GROQ_API_KEY"]
@@ -165,11 +187,7 @@ def get_ai_analysis(ticker, data, news_list):
     except Exception:
         return "⚠️ Error: Could not load secrets."
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     prompt = f"""
     You are a Wall Street analyst. Analyze {ticker} based on this data:
     Price: {current_price}
@@ -181,7 +199,6 @@ def get_ai_analysis(ticker, data, news_list):
     2. One Key Reason
     3. Action (Buy/Sell/Wait)
     """
-    
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
@@ -241,7 +258,6 @@ period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], i
 if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader("🏢 Fundamentals")
-    # UPDATED: Uses robust function to prevent sidebar errors
     info = get_company_info(ticker)
     
     if info:
@@ -250,7 +266,6 @@ if ticker:
         market_cap = info.get('marketCap', 0)
         div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         
-        # Handle N/A P/E ratios gracefully
         if pe_ratio != 'N/A':
             pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
         else:
@@ -273,7 +288,6 @@ chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area",
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🤖 AI Analyst")
-# UPDATED BUTTON: Uses callback to switch state
 st.sidebar.button("Generate Report", on_click=run_ai_analysis)
 
 # --- MAIN DASHBOARD LOGIC ---
@@ -281,23 +295,26 @@ if ticker:
     df = get_stock_data(ticker, period) 
     
     if not df.empty:
-        # Filter zero volume
         if not df[df['Volume'] > 0].empty:
             df = df[df['Volume'] > 0]
         
         current_price = df['Close'].iloc[-1]
         
-        # --- FIX: Removed the "Auto Sensitivity" Loop to prevent dashboard crash ---
-        # Instead of calculating it 20 times, we default to 10 or let the user choose.
-        optimal_n = 10 
+        # --- AUTO-SENSITIVITY CALCULATION ---
+        # Calculate optimal n for 3-5 lines
+        optimal_n = calculate_optimal_sensitivity(df)
 
-        # Sidebar Settings
         st.sidebar.caption("Overlays")
         show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
         show_bb = st.sidebar.checkbox('Show Bollinger Bands')
-        sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
+        
+        # Using key=ticker ensures the slider resets to optimal_n when ticker changes
+        sensitivity = st.sidebar.number_input("Sensitivity (Auto-Optimized)", 
+                                              min_value=2, max_value=50, 
+                                              value=optimal_n, 
+                                              key=f"sens_{ticker}")
         
         # Metrics
         df['RSI'] = calculate_rsi(df['Close'])
@@ -309,7 +326,7 @@ if ticker:
         col3.metric("Low", f"₹{df['Low'].min():.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
-        # --- AI REPORT SECTION (CONTROLS VISIBILITY) ---
+        # --- AI REPORT SECTION ---
         if st.session_state.show_ai:
             if st.button("← Back to Dashboard", type="primary"):
                 go_back()
@@ -332,10 +349,7 @@ if ticker:
                             else:
                                 st.write(n)
         
-        # --- PLOTTING LOGIC (ALWAYS VISIBLE) ---
-        # NOTE: This block is NOT inside 'if st.session_state.show_ai:'
-        
-        # --- UPDATE: Added Tab 3 for Sector Comparison ---
+        # --- PLOTTING LOGIC ---
         tab1, tab2, tab3 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison"])
         
         with tab1:
@@ -360,6 +374,7 @@ if ticker:
 
             if show_support or show_resistance:
                  levels = []
+                 # Use the sensitivity from the slider (which is now auto-optimized by default)
                  n = int(sensitivity)
                  for i in range(n, df.shape[0]-n):
                      if show_support and is_support(df, i, n):
@@ -399,23 +414,18 @@ if ticker:
             fig_macd.update_layout(height=500, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
             st.plotly_chart(fig_macd, use_container_width=True)
 
-        # --- NEW TAB 3 CONTENT ---
         with tab3:
             st.subheader(f"Performance: {ticker} vs Nifty 50")
             comp_data, correlation = get_market_comparison(ticker, period)
             
             if comp_data is not None and not comp_data.empty:
-                # Metrics
                 c1, c2 = st.columns([1, 3])
                 c1.metric("Correlation", f"{correlation:.2f}")
                 if correlation > 0.7: c1.success("Moves with Market")
                 elif correlation < 0.3: c1.warning("Moves Independently")
                 
-                # Comparison Plot
                 fig_comp = go.Figure()
-                # Plot Stock
                 fig_comp.add_trace(go.Scatter(x=comp_data.index, y=comp_data.iloc[:, 0], name=ticker, line=dict(color='#00e676', width=2)))
-                # Plot Market
                 fig_comp.add_trace(go.Scatter(x=comp_data.index, y=comp_data.iloc[:, 1], name='Nifty 50', line=dict(color='white', width=1, dash='dash')))
                 
                 fig_comp.update_layout(title="Relative Return (%)", template="plotly_dark", height=500, yaxis_title="% Change", margin=dict(l=0, r=0, t=0, b=0))
