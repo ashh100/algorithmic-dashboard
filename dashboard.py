@@ -536,6 +536,7 @@ if ticker:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
         # [MODIFIED] Portfolio Tracker Tab with Sidebar Sync
+        # [FIXED] Portfolio Tracker Tab - No More Price Resetting
         with tab4:
             st.subheader("💼 Portfolio Tracker")
             
@@ -556,33 +557,40 @@ if ticker:
                             selected_label = st.selectbox("Select Stock", options=results.keys(), key="pf_select_box")
                             chosen_ticker = results[selected_label]
                             
-                            # SYNC BUTTON
                             if st.button(f"⚡ Set Dashboard to {chosen_ticker}"):
                                 st.session_state['ticker'] = chosen_ticker
-                                # [CRITICAL FIX] 
-                                # Increment trigger to reset the sidebar search widget entirely
                                 st.session_state.search_key_trigger += 1
-                                st.toast(f"Dashboard updated to {chosen_ticker}! Scroll up to see charts.", icon="⚡")
+                                st.toast(f"Dashboard updated to {chosen_ticker}!", icon="⚡")
                                 st.rerun()
                         else:
                             st.warning("No Indian stocks found.")
                             
-                # Logic to get the default price for the ADD form
-                default_price = 0.0
+                # --- CRITICAL FIX START ---
+                # Logic: Only update the inputs if the searched ticker has CHANGED.
+                # If you are just typing in the price box, this block is skipped.
                 if chosen_ticker:
-                    try:
-                        stock_info = yf.Ticker(chosen_ticker)
-                        try:
-                            default_price = stock_info.fast_info.last_price
-                        except:
-                            default_price = stock_info.history(period='1d')['Close'].iloc[-1]
-                    except:
-                        default_price = 0.0
+                    # Initialize tracker if not exists
+                    if 'last_pf_ticker' not in st.session_state:
+                        st.session_state.last_pf_ticker = None
                     
-                    if 'pf_ticker_input' in st.session_state:
-                         st.session_state.pf_ticker_input = chosen_ticker
-                    if 'pf_price_input' in st.session_state:
-                         st.session_state.pf_price_input = float(default_price)
+                    # ONLY run this if we switched to a new stock
+                    if st.session_state.last_pf_ticker != chosen_ticker:
+                        try:
+                            stock_info = yf.Ticker(chosen_ticker)
+                            try:
+                                default_price = stock_info.fast_info.last_price
+                            except:
+                                default_price = stock_info.history(period='1d')['Close'].iloc[-1]
+                        except:
+                            default_price = 0.0
+                        
+                        # Update the input boxes
+                        st.session_state.pf_ticker_input = chosen_ticker
+                        st.session_state.pf_price_input = float(default_price)
+                        
+                        # Mark this ticker as "processed" so we don't overwrite again
+                        st.session_state.last_pf_ticker = chosen_ticker
+                # --- CRITICAL FIX END ---
 
                 st.divider()
 
@@ -595,6 +603,7 @@ if ticker:
                 with c2:
                     new_qty = st.number_input("Quantity", min_value=1, value=10, key="pf_qty_input")
                 with c3:
+                    # Now you can type here freely without it resetting!
                     new_price = st.number_input("Avg Buy Price", min_value=0.0, format="%.2f", key="pf_price_input")
                 with c4:
                     st.write("") 
@@ -608,12 +617,9 @@ if ticker:
                             })
                             
                             st.session_state['ticker'] = new_ticker
-                            
-                            # [CRITICAL FIX]
-                            # Same here: Reset sidebar search safely
                             st.session_state.search_key_trigger += 1
                             
-                            st.toast(f"Added {new_ticker} to Portfolio & Updated Dashboard!", icon="✅")
+                            st.toast(f"Added {new_ticker} to Portfolio!", icon="✅")
                             st.rerun() 
                         else:
                             st.error("Invalid Ticker")
