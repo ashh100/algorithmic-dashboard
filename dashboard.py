@@ -5,10 +5,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
 import numpy as np
+import google.generativeai as genai
 
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
 st.title("Algorithmic Dashboard")
+
+# --- CONFIGURE AI ---
+try:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+except Exception as e:
+    st.error("⚠️ AI Key missing. Create .streamlit/secrets.toml to fix.")
 
 # --- UTILITY FUNCTIONS ---
 def search_tickers(query):
@@ -61,6 +68,32 @@ def count_levels(df, n, current_price):
                 levels.append(l)
     return len(levels)
 
+def get_ai_analysis(ticker, data):
+    """Sends chart data to Gemini for a summary."""
+    recent_data = data.tail(10).to_string()
+    current_price = data['Close'].iloc[-1]
+    
+    prompt = f"""
+    Act as a senior technical analyst. Analyze this stock data for {ticker}.
+    Current Price: {current_price}
+    
+    Recent Data (Last 10 Days):
+    {recent_data}
+    
+    Task:
+    1. Identify the immediate trend (Bullish/Bearish/Neutral).
+    2. Highlight any support/resistance or RSI anomalies.
+    3. Provide a clear "Trader's Take" conclusion.
+    
+    Keep it concise, professional, and use bullet points. Max 100 words.
+    """
+    try:
+        model = genai.GenerativeModel('models/gemini-2.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"AI Error: {str(e)}"
+
 # --- DATA FETCHING ---
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
@@ -94,9 +127,17 @@ else:
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
-# --- NEW: CHART STYLE SELECTOR ---
+# --- CHART STYLE SELECTOR ---
 st.sidebar.subheader("Chart Display")
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
+
+# --- AI ANALYST BUTTON ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 AI Analyst")
+if st.sidebar.button("Generate Report"):
+    run_ai = True
+else:
+    run_ai = False
 
 # 3. Main Dashboard Logic
 if ticker:
@@ -133,6 +174,12 @@ if ticker:
         col3.metric("Low", f"₹{df['Low'].min():.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
+        # --- AI REPORT SECTION ---
+        if run_ai:
+            with st.spinner(f"Analyzing market structure for {ticker}..."):
+                analysis = get_ai_analysis(ticker, df)
+                st.info(f"**AI Analysis:**\n\n{analysis}")
+
         # --- PLOTTING LOGIC ---
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
                             row_heights=[0.6, 0.2, 0.2], 
@@ -142,25 +189,22 @@ if ticker:
         if chart_type == "Candlestick":
             fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
                                          low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-        
         elif chart_type == "Line":
             fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', 
                                      name="Close", line=dict(color='#00e676')), row=1, col=1)
-            
         elif chart_type == "Area":
             fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', 
                                      name="Close", line=dict(color='#2962ff')), row=1, col=1)
-            
         elif chart_type == "OHLC":
             fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], 
                                   low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
 
-        # 2. Overlays (Work on all charts)
+        # 2. Overlays
         if show_ema:
             fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#00e676', width=1), name='EMA 20'), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
         
-        # 3. Support/Resistance (Only logic calculation needed)
+        # 3. Support/Resistance
         if show_support or show_resistance:
             levels = []
             n = int(sensitivity)
