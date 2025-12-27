@@ -24,7 +24,6 @@ if "ticker" not in st.session_state:
     st.session_state["ticker"] = "RELIANCE.NS"
 
 # Initialize Search Key Wrapper
-# We use this to manually clear the sidebar search box safely
 if "search_key_trigger" not in st.session_state:
     st.session_state.search_key_trigger = 0
 
@@ -79,7 +78,7 @@ def detect_candlestick_patterns(df):
     patterns = []
     offset_pct = 0.015 
     
-    # --- OPTION A: TA-LIB ---
+    # --- OPTION A: TA-LIB (Try/Except) ---
     try:
         import talib
         hammer = talib.CDLHAMMER(df['Open'], df['High'], df['Low'], df['Close'])
@@ -132,7 +131,7 @@ def detect_candlestick_patterns(df):
                  patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
             elif (color == 'Green') and (prev_color == 'Red'):
                 if (df['Close'].iloc[i] > prev_open) and (df['Open'].iloc[i] < prev_close):
-                      patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
+                       patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
             elif (color == 'Red') and (prev_color == 'Green'):
                 if (df['Close'].iloc[i] < prev_open) and (df['Open'].iloc[i] > prev_close):
                     patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
@@ -299,13 +298,9 @@ def get_stock_data(ticker, period):
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
 
-# [CRITICAL FIX] DYNAMIC KEY
-# We effectively "reset" the widget by changing its key whenever 'search_key_trigger' increments.
-# This avoids the "StreamlitAPIException" because we are creating a *new* widget instead of modifying an existing one.
 search_key = f"sidebar_search_{st.session_state.search_key_trigger}"
 search_query = st.sidebar.text_input("Search Company", key=search_key)
 
-# Logic to find ticker
 if search_query:
     results = search_tickers(search_query)
     if results:
@@ -320,15 +315,12 @@ else:
         st.session_state["ticker"] = "RELIANCE.NS"
     ticker = st.session_state["ticker"]
 
-# Time Period Selector
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
-# --- FUNDAMENTALS SECTION (UPDATES BASED ON TICKER) ---
 if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📍 {ticker}") 
     
-    # Fetch Data
     info = get_company_info(ticker)
     
     if info:
@@ -337,7 +329,6 @@ if ticker:
         market_cap = info.get('marketCap', 0)
         div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         
-        # Formatting
         if pe_ratio != 'N/A':
             pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
         else:
@@ -347,7 +338,6 @@ if ticker:
         elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
         else: mcap_str = f"₹{market_cap/1e6:.2f}M"
 
-        # Display Metrics
         st.sidebar.info(f"**Sector:** {sector}")
         st.sidebar.metric("Market Cap", mcap_str)
         st.sidebar.metric("P/E Ratio", pe_str)
@@ -373,7 +363,6 @@ if ticker:
         
         current_price = df['Close'].iloc[-1]
         
-        # Calculate Period Extremes (Used in Metrics at top)
         period_high = df['High'].max()
         period_low = df['Low'].min()
         high_date = df['High'].idxmax()
@@ -393,7 +382,6 @@ if ticker:
                                               value=optimal_n, 
                                               key=f"sens_{ticker}")
         
-        # Metrics
         df['RSI'] = calculate_rsi(df['Close'])
         current_volatility = df['Volatility'].iloc[-1] * 100 if not np.isnan(df['Volatility'].iloc[-1]) else 0
         
@@ -403,7 +391,6 @@ if ticker:
         col3.metric("Low", f"₹{period_low:.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
-        # --- AI REPORT SECTION ---
         if st.session_state.show_ai:
             if st.button("← Back to Dashboard", type="primary"):
                 go_back()
@@ -426,7 +413,6 @@ if ticker:
                             else:
                                 st.write(n)
         
-        # --- PLOTTING LOGIC ---
         tab1, tab2, tab3, tab4 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison", "💼 Portfolio"])
         
         with tab1:
@@ -490,7 +476,6 @@ if ticker:
                      color = "green" if kind == "Support" else "red"
                      fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
 
-            # Volume Colors
             colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
             fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
 
@@ -535,8 +520,6 @@ if ticker:
             else:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
-        # [MODIFIED] Portfolio Tracker Tab with Sidebar Sync
-        # [FIXED] Portfolio Tracker Tab - No More Price Resetting
         with tab4:
             st.subheader("💼 Portfolio Tracker")
             
@@ -565,15 +548,10 @@ if ticker:
                         else:
                             st.warning("No Indian stocks found.")
                             
-                # --- CRITICAL FIX START ---
-                # Logic: Only update the inputs if the searched ticker has CHANGED.
-                # If you are just typing in the price box, this block is skipped.
                 if chosen_ticker:
-                    # Initialize tracker if not exists
                     if 'last_pf_ticker' not in st.session_state:
                         st.session_state.last_pf_ticker = None
                     
-                    # ONLY run this if we switched to a new stock
                     if st.session_state.last_pf_ticker != chosen_ticker:
                         try:
                             stock_info = yf.Ticker(chosen_ticker)
@@ -584,13 +562,9 @@ if ticker:
                         except:
                             default_price = 0.0
                         
-                        # Update the input boxes
                         st.session_state.pf_ticker_input = chosen_ticker
                         st.session_state.pf_price_input = float(default_price)
-                        
-                        # Mark this ticker as "processed" so we don't overwrite again
                         st.session_state.last_pf_ticker = chosen_ticker
-                # --- CRITICAL FIX END ---
 
                 st.divider()
 
@@ -603,11 +577,11 @@ if ticker:
                 with c2:
                     new_qty = st.number_input("Quantity", min_value=1, value=10, key="pf_qty_input")
                 with c3:
-                    # Now you can type here freely without it resetting!
                     new_price = st.number_input("Avg Buy Price", min_value=0.0, format="%.2f", key="pf_price_input")
                 with c4:
                     st.write("") 
                     st.write("")
+                    # --- FIXED SECTION START ---
                     if st.button("Add"):
                         if new_ticker and new_price > 0:
                             st.session_state.portfolio.append({
@@ -620,11 +594,11 @@ if ticker:
                             st.session_state.search_key_trigger += 1
                             
                             st.toast(f"Added {new_ticker} to Portfolio!", icon="✅")
-                            st.rerun() 
+                            # REMOVED st.rerun() HERE TO PREVENT TAB RESET
                         else:
                             st.error("Invalid Ticker")
+                    # --- FIXED SECTION END ---
 
-            # --- DISPLAY PORTFOLIO ---
             if st.session_state.portfolio:
                 pf_df = pd.DataFrame(st.session_state.portfolio)
                 pf_df['Ticker'] = pf_df['Ticker'].astype(str).str.strip().str.upper()
