@@ -113,20 +113,38 @@ def get_stock_news(ticker):
 
 # --- NEW: HUGGING FACE AI INTEGRATION (ROUTER + ZEPHYR FIXED) ---
 # --- NEW: GROQ AI INTEGRATION ---
+# --- NEW: GROQ AI INTEGRATION (FIXED) ---
 def get_ai_analysis(ticker, data, news_list):
     # 1. Prepare Data
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
-    news_context = "\n".join(news_list) if news_list else "No recent news available."
+    
+    # --- FIX STARTS HERE ---
+    # Convert list of dictionaries -> formatted string for the AI
+    if news_list and len(news_list) > 0:
+        formatted_news = []
+        for item in news_list:
+            # Handle cases where item might be a string (legacy) or dict (new)
+            if isinstance(item, dict):
+                formatted_news.append(f"- {item['title']} (Source: {item['publisher']})")
+            else:
+                formatted_news.append(f"- {item}")
+        news_context = "\n".join(formatted_news)
+    else:
+        news_context = "No recent news available."
+    # --- FIX ENDS HERE ---
     
     # 2. API Setup
-    # Groq offers an OpenAI-compatible API, but we use raw requests to keep it simple
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
     
     try:
-        api_key = st.secrets["GROQ_API_KEY"]
-    except:
-        return "⚠️ Error: GROQ_API_KEY missing in .streamlit/secrets.toml"
+        # Check for secrets safely
+        if "GROQ_API_KEY" in st.secrets:
+            api_key = st.secrets["GROQ_API_KEY"]
+        else:
+            return "⚠️ Error: GROQ_API_KEY missing in .streamlit/secrets.toml"
+    except Exception:
+        return "⚠️ Error: Could not load secrets."
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -150,7 +168,7 @@ def get_ai_analysis(ticker, data, news_list):
     3. Action (Buy/Sell/Wait)
     """
     
-    # 4. Payload (Using Llama 3 for speed and smarts)
+    # 4. Payload
     payload = {
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
