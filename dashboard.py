@@ -59,7 +59,86 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- NEW: AUTO-SENSITIVITY CALCULATOR ---
+# --- NEW: HYBRID PATTERN RECOGNITION ENGINE (ADDED) ---
+def detect_candlestick_patterns(df):
+    """
+    Hybrid Engine:
+    1. Tries to import TA-Lib (Fast C library).
+    2. If missing (common on Py 3.14), falls back to pure Python math.
+    """
+    patterns = []
+    
+    # --- OPTION A: TA-LIB (Advanced) ---
+    try:
+        import talib
+        # If this import succeeds, we use these powerful functions
+        hammer = talib.CDLHAMMER(df['Open'], df['High'], df['Low'], df['Close'])
+        star = talib.CDLSHOOTINGSTAR(df['Open'], df['High'], df['Low'], df['Close'])
+        engulfing = talib.CDLENGULFING(df['Open'], df['High'], df['Low'], df['Close'])
+        morning = talib.CDLMORNINGSTAR(df['Open'], df['High'], df['Low'], df['Close'])
+        evening = talib.CDLEVENINGSTAR(df['Open'], df['High'], df['Low'], df['Close'])
+
+        for i in range(len(df)):
+            if df['Volume'].iloc[i] == 0: continue
+            date = df.index[i]
+            
+            # Prioritize signals
+            if morning[i] == 100:
+                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Morn. Star', 'color': 'green', 'symbol': 'triangle-up'})
+            elif evening[i] == -100:
+                patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Even. Star', 'color': 'red', 'symbol': 'triangle-down'})
+            elif engulfing[i] == 100:
+                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
+            elif engulfing[i] == -100:
+                patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
+            elif hammer[i] == 100:
+                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Hammer', 'color': 'yellow', 'symbol': 'triangle-up'})
+            elif star[i] == -100:
+                patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
+                
+        return patterns
+
+    # --- OPTION B: MANUAL MATH (Fallback) ---
+    except ImportError:
+        # Pre-calculate candle properties
+        df = df.copy() # Avoid SettingWithCopy warning
+        df['Body'] = abs(df['Close'] - df['Open'])
+        df['Upper_Shadow'] = df['High'] - df[['Close', 'Open']].max(axis=1)
+        df['Lower_Shadow'] = df[['Close', 'Open']].min(axis=1) - df['Low']
+        df['Color'] = np.where(df['Close'] >= df['Open'], 'Green', 'Red')
+        
+        for i in range(1, len(df)):
+            date = df.index[i]
+            body = df['Body'].iloc[i]
+            upper = df['Upper_Shadow'].iloc[i]
+            lower = df['Lower_Shadow'].iloc[i]
+            color = df['Color'].iloc[i]
+            
+            prev_open = df['Open'].iloc[i-1]
+            prev_close = df['Close'].iloc[i-1]
+            prev_color = df['Color'].iloc[i-1]
+            
+            # 1. Hammer (Bottom Reversal)
+            if (lower > 2 * body) and (upper < 0.5 * body) and (body > 0):
+                patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Hammer', 'color': 'yellow', 'symbol': 'triangle-up'})
+
+            # 2. Shooting Star (Top Reversal)
+            elif (upper > 2 * body) and (lower < 0.5 * body) and (body > 0):
+                 patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
+
+            # 3. Bullish Engulfing
+            elif (color == 'Green') and (prev_color == 'Red'):
+                if (df['Close'].iloc[i] > prev_open) and (df['Open'].iloc[i] < prev_close):
+                     patterns.append({'date': date, 'price': df['Low'].iloc[i], 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
+
+            # 4. Bearish Engulfing
+            elif (color == 'Red') and (prev_color == 'Green'):
+                if (df['Close'].iloc[i] < prev_open) and (df['Open'].iloc[i] > prev_close):
+                    patterns.append({'date': date, 'price': df['High'].iloc[i], 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
+
+        return patterns
+
+# --- AUTO-SENSITIVITY CALCULATOR ---
 def calculate_optimal_sensitivity(df):
     """
     Iterates through sensitivity values to find one that produces 
@@ -308,6 +387,8 @@ if ticker:
         show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
+        # --- NEW: PATTERN TOGGLE ---
+        show_patterns = st.sidebar.checkbox("Show Patterns (Hammer/Engulfing)", value=False)
         show_bb = st.sidebar.checkbox('Show Bollinger Bands')
         
         # Using key=ticker ensures the slider resets to optimal_n when ticker changes
@@ -371,6 +452,21 @@ if ticker:
             if show_bb and 'Upper_Band' in df.columns:
                 fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
                 fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
+
+            # --- NEW: PLOT DETECTED PATTERNS ---
+            if show_patterns:
+                patterns = detect_candlestick_patterns(df)
+                if patterns:
+                    for p in patterns:
+                        fig.add_trace(go.Scatter(
+                            x=[p['date']], y=[p['price']],
+                            mode='markers',
+                            marker=dict(symbol=p['symbol'], size=12, color=p['color']),
+                            name=p['label'],
+                            hovertext=p['label']
+                        ), row=1, col=1)
+                else:
+                    st.toast("No major patterns found in this period.")
 
             if show_support or show_resistance:
                  levels = []
