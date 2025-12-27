@@ -8,7 +8,7 @@ import numpy as np
 import google.generativeai as genai
 
 # 1. Page Setup
-st.set_page_config(layout="wide", page_title="Ashwath's Terminal")
+st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
 st.title("Algorithmic Dashboard")
 
 # --- CONFIGURE AI ---
@@ -68,24 +68,51 @@ def count_levels(df, n, current_price):
                 levels.append(l)
     return len(levels)
 
-def get_ai_analysis(ticker, data):
-    """Sends chart data to Gemini for a summary."""
+# --- NEW FUNCTION: FETCH NEWS ---
+@st.cache_data(ttl=3600)
+def get_stock_news(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        news = stock.news
+        headlines = []
+        if news:
+            for n in news[:5]: # Get top 5 headlines
+                headlines.append(f"- {n['title']}")
+        return headlines
+    except:
+        return []
+
+def get_ai_analysis(ticker, data, news_list):
+    """Sends chart data AND news to Gemini for a smart summary."""
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
+    # Format news for the prompt
+    news_context = "\n".join(news_list) if news_list else "No recent news available."
+
     prompt = f"""
-    Act as a senior technical analyst. Analyze this stock data for {ticker}.
-    Current Price: {current_price}
+    Act as a senior Wall Street analyst. Analyze {ticker}.
     
-    Recent Data (Last 10 Days):
+    1. MARKET DATA (Technical):
+    Current Price: {current_price}
+    Recent OHLCV Data:
     {recent_data}
     
-    Task:
-    1. Identify the immediate trend (Bullish/Bearish/Neutral).
-    2. Highlight any support/resistance or RSI anomalies.
-    3. Provide a clear "Trader's Take" conclusion.
+    2. NEWS CONTEXT (Fundamental):
+    {news_context}
     
-    Keep it concise, professional, and use bullet points. Max 100 words.
+    TASK:
+    Combine the technical trend with the news sentiment.
+    - If news is negative but price is rising, is it a bull trap?
+    - If news is positive and price is rising, is it a breakout?
+    
+    OUTPUT FORMAT:
+    - **Trend:** [Bullish/Bearish/Neutral]
+    - **Key Insight:** [One sentence summary]
+    - **News Sentiment:** [Positive/Negative/Mixed]
+    - **Verdict:** [Buy/Sell/Hold rationale]
+    
+    Keep it under 150 words.
     """
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -110,7 +137,7 @@ def get_stock_data(ticker, period):
     
     return df
 
-@st.cache_data(ttl=86400) # Cache company info for 24 hours
+@st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     try:
         stock = yf.Ticker(ticker)
@@ -135,7 +162,7 @@ else:
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
-# --- FUNDAMENTALS SECTION (NEW) ---
+# --- FUNDAMENTALS SECTION ---
 if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader("🏢 Fundamentals")
@@ -147,13 +174,9 @@ if ticker:
         market_cap = info.get('marketCap', 0)
         div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         
-        # Format Market Cap (Trillions/Billions)
-        if market_cap > 1e12:
-            mcap_str = f"₹{market_cap/1e12:.2f}T"
-        elif market_cap > 1e9:
-            mcap_str = f"₹{market_cap/1e9:.2f}B"
-        else:
-            mcap_str = f"₹{market_cap/1e6:.2f}M"
+        if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
+        elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
+        else: mcap_str = f"₹{market_cap/1e6:.2f}M"
 
         st.sidebar.info(f"**Sector:** {sector}")
         st.sidebar.metric("Market Cap", mcap_str)
@@ -183,7 +206,7 @@ if ticker:
         df = df[df['Volume'] > 0]
         current_price = df['Close'].iloc[-1]
         
-        # --- AUTO SENSITIVITY ENGINE (SILENT) ---
+        # --- AUTO SENSITIVITY ENGINE ---
         valid_n = []
         for n_scan in range(5, 45, 2): 
             count = count_levels(df, n_scan, current_price)
@@ -211,18 +234,27 @@ if ticker:
         col3.metric("Low", f"₹{df['Low'].min():.2f}")
         col4.metric("Volatility", f"{current_volatility:.2f}%")
 
-        # --- AI REPORT SECTION ---
+        # --- AI REPORT SECTION (UPDATED) ---
         if run_ai:
-            with st.spinner(f"Analyzing market structure for {ticker}..."):
-                analysis = get_ai_analysis(ticker, df)
+            with st.spinner(f"Reading news & analyzing charts for {ticker}..."):
+                news_headlines = get_stock_news(ticker)
+                analysis = get_ai_analysis(ticker, df, news_headlines)
                 st.info(f"**AI Analysis:**\n\n{analysis}")
+                
+                # Show the news sources to the user
+                with st.expander("📰 Read the News Headlines Used by AI"):
+                    if news_headlines:
+                        for h in news_headlines:
+                            st.write(h)
+                    else:
+                        st.write("No specific news found.")
 
         # --- PLOTTING LOGIC ---
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
                             row_heights=[0.6, 0.2, 0.2], 
                             subplot_titles=("Price Action", "Volume", "RSI"))
 
-        # 1. Main Chart (Dynamic Type)
+        # 1. Main Chart
         if chart_type == "Candlestick":
             fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
                                          low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
