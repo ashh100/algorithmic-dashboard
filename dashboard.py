@@ -195,14 +195,25 @@ def get_stock_data(ticker, period):
     
     if df.empty: return df
 
-    # EMA & Volatility
+    # --- EXISTING INDICATORS ---
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Pct_Change'] = df['Close'].pct_change()
     df['Volatility'] = df['Pct_Change'].rolling(window=20).std()
     
+    # --- NEW: MACD ---
+    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
+    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    
+    # --- NEW: BOLLINGER BANDS ---
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['STD_20'] = df['Close'].rolling(window=20).std()
+    df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
+    df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
+    
     return df
-
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     try:
@@ -317,57 +328,87 @@ if ticker:
                     else:
                         st.write("No specific news found.")
 
-        # --- PLOTTING LOGIC ---
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, 
-                            row_heights=[0.6, 0.2, 0.2], 
-                            subplot_titles=("Price Action", "Volume", "RSI"))
-
-        # 1. Main Chart
-        if chart_type == "Candlestick":
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
-                                         low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-        elif chart_type == "Line":
-            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', 
-                                     name="Close", line=dict(color='#00e676')), row=1, col=1)
-        elif chart_type == "Area":
-            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', 
-                                     name="Close", line=dict(color='#2962ff')), row=1, col=1)
-        elif chart_type == "OHLC":
-            fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], 
-                                  low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-
-        # 2. Overlays
-        if show_ema:
-            fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#00e676', width=1), name='EMA 20'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
+      # --- PLOTTING LOGIC (UPGRADED) ---
         
-        # 3. Support/Resistance
-        if show_support or show_resistance:
-            levels = []
-            n = int(sensitivity)
-            for i in range(n, df.shape[0]-n):
-                if show_support and is_support(df, i, n):
-                    l = df['Low'][i]
-                    if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
-                        levels.append((df.index[i], l, "Support"))
-                elif show_resistance and is_resistance(df, i, n):
-                    l = df['High'][i]
-                    if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
-                        levels.append((df.index[i], l, "Resistance"))
+        # Create Tabs for organized viewing
+        tab1, tab2 = st.tabs(["📈 Price Action", "📊 Technical Indicators"])
+        
+        # --- TAB 1: MAIN PRICE CHART ---
+        with tab1:
+            # We use 2 rows here: Price on top, Volume on bottom
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                vertical_spacing=0.1, row_heights=[0.7, 0.3])
+
+            # 1. Candlestick / Line / Area
+            if chart_type == "Candlestick":
+                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], 
+                                             low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+            elif chart_type == "Line":
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', 
+                                         name="Close", line=dict(color='#00e676')), row=1, col=1)
+            elif chart_type == "Area":
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy', mode='lines', 
+                                         name="Close", line=dict(color='#2962ff')), row=1, col=1)
+            elif chart_type == "OHLC":
+                fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], 
+                                      low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             
-            for date, level, kind in levels:
-                color = "green" if kind == "Support" else "red"
-                fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
+            # 2. Moving Averages (Overlays)
+            if show_ema:
+                fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='#ff9100', width=1), name='EMA 20'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['EMA_50'], line=dict(color='#2962ff', width=1), name='EMA 50'), row=1, col=1)
 
-        # 4. Volume & RSI
-        colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
-        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#b388ff'), name='RSI'), row=3, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", row=3, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", row=3, col=1)
+            # 3. Bollinger Bands (New Feature)
+            if 'Upper_Band' in df.columns:
+                fig.add_trace(go.Scatter(x=df.index, y=df['Upper_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Upper Band'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df['Lower_Band'], line=dict(color='rgba(255, 255, 255, 0.1)'), name='Lower Band', fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)'), row=1, col=1)
 
-        fig.update_layout(height=800, xaxis_rangeslider_visible=False, template="plotly_dark", showlegend=False, margin=dict(l=50, r=50, t=50, b=50))
-        st.plotly_chart(fig, use_container_width=True)
+            # 4. Support & Resistance Lines
+            if show_support or show_resistance:
+                 levels = []
+                 n = int(sensitivity) # Uses your sensitivity slider
+                 for i in range(n, df.shape[0]-n):
+                     if show_support and is_support(df, i, n):
+                         l = df['Low'][i]
+                         if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
+                             levels.append((df.index[i], l, "Support"))
+                     elif show_resistance and is_resistance(df, i, n):
+                         l = df['High'][i]
+                         if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
+                             levels.append((df.index[i], l, "Resistance"))
+                 for date, level, kind in levels:
+                     color = "green" if kind == "Support" else "red"
+                     fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
 
+            # 5. Volume Bar Chart
+            colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
+            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+
+            fig.update_layout(height=600, xaxis_rangeslider_visible=False, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+        # --- TAB 2: MOMENTUM INDICATORS (New Feature) ---
+        with tab2:
+            st.subheader("Momentum & Strength")
+            
+            # MACD & RSI Subplots
+            fig_macd = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.5, 0.5])
+            
+            # 1. RSI Trace
+            fig_macd.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='#b388ff', width=2), name='RSI'), row=1, col=1)
+            fig_macd.add_hline(y=70, line_dash="dash", line_color="red", row=1, col=1)
+            fig_macd.add_hline(y=30, line_dash="dash", line_color="green", row=1, col=1)
+            fig_macd.update_yaxes(title_text="RSI", row=1, col=1)
+            
+            # 2. MACD Histogram Trace
+            if 'MACD' in df.columns:
+                colors_macd = ['#00e676' if val >= 0 else '#ff1744' for val in df['MACD'] - df['Signal_Line']]
+                fig_macd.add_trace(go.Bar(x=df.index, y=df['MACD'] - df['Signal_Line'], marker_color=colors_macd, name='MACD Hist'), row=2, col=1)
+                fig_macd.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='#2962ff', width=1), name='MACD'), row=2, col=1)
+                fig_macd.add_trace(go.Scatter(x=df.index, y=df['Signal_Line'], line=dict(color='#ff9100', width=1), name='Signal'), row=2, col=1)
+                fig_macd.update_yaxes(title_text="MACD", row=2, col=1)
+
+            fig_macd.update_layout(height=500, template="plotly_dark", margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            st.plotly_chart(fig_macd, use_container_width=True)
     else:
         st.error("Error loading data.")
