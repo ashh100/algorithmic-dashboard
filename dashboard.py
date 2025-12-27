@@ -65,29 +65,36 @@ def count_levels(df, n, current_price):
     return len(levels)
 
 # --- NEWS FUNCTION ---
+# --- NEWS FUNCTION (Fixed with User-Agent) ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     """
-    Fetches news from Google News RSS instead of yfinance.
-    This is much more reliable for Indian stocks.
+    Fetches news from Google News RSS with a User-Agent to avoid blocking.
     """
     try:
-        # 1. Clean the ticker (convert "RELIANCE.NS" -> "RELIANCE") for better search results
+        # 1. Clean the ticker (e.g., "RELIANCE.NS" -> "RELIANCE")
         search_term = ticker.split('.')[0] 
         
-        # 2. Use the Google News RSS feed for India (IN)
+        # 2. Google News RSS URL for India
         url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
         
-        # 3. Fetch and Parse
-        response = requests.get(url, timeout=5)
+        # 3. CRITICAL FIX: Add headers so Google thinks we are a browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # 4. Fetch with headers
+        response = requests.get(url, headers=headers, timeout=5)
+        
+        # 5. Parse XML
         root = ET.fromstring(response.content)
         news_items = []
         
-        # 4. Extract top 5 stories
         for item in root.findall('.//item')[:5]:
             title = item.find('title').text
             link = item.find('link').text
-            # specific logic to get the publisher name cleanly
+            
+            # Extract publisher safely
             source = item.find('source')
             publisher = source.text if source is not None else "Google News"
             
@@ -100,7 +107,8 @@ def get_stock_news(ticker):
         return news_items
 
     except Exception as e:
-        print(f"News fetch error: {e}")
+        # Print error to terminal for debugging if it fails again
+        print(f"News fetch error for {ticker}: {e}")
         return []
 
 # --- NEW: HUGGING FACE AI INTEGRATION (ROUTER + ZEPHYR FIXED) ---
