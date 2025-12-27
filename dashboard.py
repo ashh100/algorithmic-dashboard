@@ -59,7 +59,7 @@ def calculate_rsi(data, window=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- UPDATED: PATTERN RECOGNITION (With Offset for Visibility) ---
+# --- PATTERN RECOGNITION (With Offset for Visibility) ---
 def detect_candlestick_patterns(df):
     """
     Hybrid Engine with VISIBILITY OFFSET.
@@ -122,7 +122,7 @@ def detect_candlestick_patterns(df):
                  patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Shoot. Star', 'color': 'orange', 'symbol': 'triangle-down'})
             elif (color == 'Green') and (prev_color == 'Red'):
                 if (df['Close'].iloc[i] > prev_open) and (df['Open'].iloc[i] < prev_close):
-                     patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
+                      patterns.append({'date': date, 'price': df['Low'].iloc[i] * (1 - offset_pct), 'label': 'Bull Engulf', 'color': 'cyan', 'symbol': 'triangle-up'})
             elif (color == 'Red') and (prev_color == 'Green'):
                 if (df['Close'].iloc[i] < prev_open) and (df['Open'].iloc[i] > prev_close):
                     patterns.append({'date': date, 'price': df['High'].iloc[i] * (1 + offset_pct), 'label': 'Bear Engulf', 'color': 'magenta', 'symbol': 'triangle-down'})
@@ -348,7 +348,7 @@ if ticker:
         
         current_price = df['Close'].iloc[-1]
         
-        # Calculate Period Extremes for the Visibility Fix
+        # Calculate Period Extremes
         period_high = df['High'].max()
         period_low = df['Low'].min()
         high_date = df['High'].idxmax()
@@ -362,7 +362,6 @@ if ticker:
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
         show_patterns = st.sidebar.checkbox("Show Patterns (Hammer/Engulfing)", value=False)
         show_bb = st.sidebar.checkbox('Show Bollinger Bands')
-        # --- NEW VISIBILITY TOGGLE ---
         show_range = st.sidebar.checkbox('Show Period High/Low Tags', value=True)
         
         sensitivity = st.sidebar.number_input("Sensitivity (Auto-Optimized)", 
@@ -410,11 +409,20 @@ if ticker:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
 
             if chart_type == "Candlestick":
+                # --- UPDATED CANDLESTICK VISUALIZATION ---
                 fig.add_trace(go.Candlestick(
-                    x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], 
+                    x=df.index, 
+                    open=df['Open'], 
+                    high=df['High'], 
+                    low=df['Low'], 
+                    close=df['Close'], 
                     name="Price",
-                    # Thicker wicks for better visibility
-                    increasing_line_width=1.5, decreasing_line_width=1.5
+                    # Vibrant colors for clear High/Low visibility
+                    increasing_line_color='#00e676', # Neon Green
+                    decreasing_line_color='#ff1744', # Neon Red
+                    # Thicker wicks to make the daily range more obvious
+                    increasing_line_width=1.5, 
+                    decreasing_line_width=1.5
                 ), row=1, col=1)
             elif chart_type == "Line":
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', name="Close", line=dict(color='#00e676')), row=1, col=1)
@@ -423,14 +431,14 @@ if ticker:
             elif chart_type == "OHLC":
                 fig.add_trace(go.Ohlc(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             
-            # --- NEW: VISIBILITY FIX (TAGS + RANGE LINES) ---
+            # --- VISIBILITY FIX (TAGS + RANGE LINES) ---
             if show_range:
                 # High Label
                 fig.add_annotation(
                     x=high_date, y=period_high,
                     text=f"High: {period_high:.2f}",
                     showarrow=True, arrowhead=2, arrowcolor="white",
-                    ax=0, ay=-40, # Push text up
+                    ax=0, ay=-40,
                     font=dict(color="white", size=11, family="Arial Black"),
                     bgcolor="rgba(200, 0, 0, 0.6)", bordercolor="red", borderwidth=1,
                     row=1, col=1
@@ -440,12 +448,12 @@ if ticker:
                     x=low_date, y=period_low,
                     text=f"Low: {period_low:.2f}",
                     showarrow=True, arrowhead=2, arrowcolor="white",
-                    ax=0, ay=40, # Push text down
+                    ax=0, ay=40,
                     font=dict(color="white", size=11, family="Arial Black"),
                     bgcolor="rgba(0, 150, 0, 0.6)", bordercolor="green", borderwidth=1,
                     row=1, col=1
                 )
-                # Range Lines (Box the price)
+                # Range Lines
                 fig.add_hline(y=period_high, line_dash="longdash", line_color="rgba(255, 0, 0, 0.3)", row=1, col=1)
                 fig.add_hline(y=period_low, line_dash="longdash", line_color="rgba(0, 255, 0, 0.3)", row=1, col=1)
 
@@ -487,6 +495,7 @@ if ticker:
                      color = "green" if kind == "Support" else "red"
                      fig.add_hline(y=level, line_dash="dot", line_color=color, row=1, col=1, opacity=0.5)
 
+            # Volume Colors matching the new Vibrant Candlesticks
             colors = ['#00e676' if r['Open'] - r['Close'] <= 0 else '#ff1744' for i, r in df.iterrows()]
             fig.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
 
