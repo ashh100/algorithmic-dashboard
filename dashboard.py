@@ -518,50 +518,63 @@ if ticker:
             st.subheader("💼 Portfolio Tracker")
             
             with st.expander("Add New Position", expanded=False):
-                # Row 1: Search & Select
+                # --- STEP 1: SEARCH ---
                 st.caption("Step 1: Search & Select Stock")
+                
+                # Create two columns for the search bar and the dropdown
                 row1_1, row1_2 = st.columns(2)
                 
                 with row1_1:
-                    pf_search_term = st.text_input("Search Company Name", placeholder="e.g., Tata, Apple, Reliance")
+                    pf_search = st.text_input("Search Ticker", placeholder="e.g. TCS, HDFC, Tata")
                 
+                # Logic to find ticker
                 chosen_ticker = None
                 
                 with row1_2:
-                    if pf_search_term:
-                        search_res = search_tickers(pf_search_term) 
-                        if search_res:
-                            # Search returns {Label: Symbol}
-                            sel_key = st.selectbox("Select Correct Ticker", options=search_res.keys())
-                            chosen_ticker = search_res[sel_key]
+                    if pf_search:
+                        # Uses your new Indian-only search function
+                        results = search_tickers(pf_search)
+                        if results:
+                            selected_label = st.selectbox("Select Stock", options=results.keys())
+                            chosen_ticker = results[selected_label]
                         else:
-                            st.warning("No matches found. Try a different name.")
-                    else:
-                         if ticker:
-                            st.info(f"Defaulting to: {ticker} (Type on left to search others)")
-                            chosen_ticker = ticker
-                
+                            st.warning("No Indian stocks found.")
+                            
+                # Logic to get the REAL price of the SEARCHED stock
+                default_price = 0.0
+                if chosen_ticker:
+                    try:
+                        # Fetch live price for the *selected* portfolio stock
+                        stock_info = yf.Ticker(chosen_ticker)
+                        # Try fast_info first (faster), fallback to history
+                        try:
+                            default_price = stock_info.fast_info.last_price
+                        except:
+                            default_price = stock_info.history(period='1d')['Close'].iloc[-1]
+                    except:
+                        default_price = 0.0
+
                 st.divider()
 
-                # Row 2: Details & Add
+                # --- STEP 2: CONFIRM DETAILS ---
                 st.caption("Step 2: Confirm Details")
-                r2_col1, r2_col2, r2_col3, r2_col4 = st.columns([2, 2, 2, 1])
                 
-                with r2_col1:
-                    # Auto-filled from search, but editable
-                    final_ticker_val = chosen_ticker if chosen_ticker else ""
-                    new_ticker = st.text_input("Ticker Symbol", value=final_ticker_val).upper()
-                with r2_col2:
+                c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+                
+                with c1:
+                    # If we picked a ticker, use it; otherwise allow manual typing
+                    val_ticker = chosen_ticker if chosen_ticker else ""
+                    new_ticker = st.text_input("Ticker Symbol", value=val_ticker).upper()
+                with c2:
                     new_qty = st.number_input("Quantity", min_value=1, value=10)
-                with r2_col3:
-                    # Attempt to fill price if the chosen ticker matches the main dashboard
-                    fill_price = current_price if (ticker and new_ticker == ticker) else 0.0
-                    new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(fill_price))
-                with r2_col4:
-                    st.write("") # Spacer
+                with c3:
+                    # [FIX] The 'value' now updates to the price of the stock we just searched
+                    new_price = st.number_input("Avg Buy Price", min_value=0.0, value=float(default_price), format="%.2f")
+                with c4:
+                    st.write("") # Spacer to align button
                     st.write("")
                     if st.button("Add"):
-                        if new_ticker:
+                        if new_ticker and new_price > 0:
                             st.session_state.portfolio.append({
                                 "Ticker": new_ticker,
                                 "Quantity": new_qty,
@@ -570,37 +583,40 @@ if ticker:
                             st.success(f"Added {new_ticker}!")
                             st.rerun()
                         else:
-                            st.error("Ticker is required.")
+                            st.error("Invalid Ticker or Price")
 
-            # Display Portfolio
+            # --- DISPLAY PORTFOLIO ---
             if st.session_state.portfolio:
                 pf_df = pd.DataFrame(st.session_state.portfolio)
                 
-                # Fetch Real-time prices
+                # Fetch Real-time prices for the table
                 unique_tickers = pf_df['Ticker'].unique().tolist()
                 realtime_data = {}
                 try:
-                    rt_quotes = yf.download(unique_tickers, period="1d", progress=False)['Close']
-                    if len(unique_tickers) == 1:
-                        val = rt_quotes.iloc[-1] if not rt_quotes.empty else 0
-                        realtime_data[unique_tickers[0]] = float(val)
-                    else:
-                        for t in unique_tickers:
-                            if t in rt_quotes.columns:
-                                realtime_data[t] = float(rt_quotes[t].iloc[-1])
-                            else:
-                                realtime_data[t] = 0
+                    if unique_tickers:
+                        rt_quotes = yf.download(unique_tickers, period="1d", progress=False)['Close']
+                        
+                        # Handle single vs multiple ticker return structure
+                        if len(unique_tickers) == 1:
+                             val = rt_quotes.iloc[-1] if not rt_quotes.empty else 0
+                             realtime_data[unique_tickers[0]] = float(val)
+                        else:
+                             for t in unique_tickers:
+                                 if t in rt_quotes.columns:
+                                     realtime_data[t] = float(rt_quotes[t].iloc[-1])
+                                 else:
+                                     realtime_data[t] = 0
                 except Exception as e:
-                    st.error(f"Error fetching portfolio prices: {e}")
+                    st.error(f"Error fetching prices: {e}")
 
-                # Calculations
+                # Calculate P/L
                 pf_df['Current Price'] = pf_df['Ticker'].map(realtime_data).fillna(0)
                 pf_df['Invested Value'] = pf_df['Quantity'] * pf_df['Buy Price']
                 pf_df['Current Value'] = pf_df['Quantity'] * pf_df['Current Price']
                 pf_df['P/L'] = pf_df['Current Value'] - pf_df['Invested Value']
                 pf_df['P/L %'] = (pf_df['P/L'] / pf_df['Invested Value']) * 100
 
-                # Summary Metrics
+                # Totals
                 total_invested = pf_df['Invested Value'].sum()
                 total_current = pf_df['Current Value'].sum()
                 total_pl = pf_df['P/L'].sum()
@@ -610,7 +626,7 @@ if ticker:
                 m2.metric("Current Value", f"₹{total_current:,.2f}")
                 m3.metric("Total P/L", f"₹{total_pl:,.2f}", delta=f"{total_pl:,.2f}")
 
-                # Styling the dataframe
+                # Table Styling
                 st.dataframe(pf_df.style.format({
                     "Buy Price": "₹{:.2f}", 
                     "Current Price": "₹{:.2f}",
@@ -618,14 +634,13 @@ if ticker:
                     "Current Value": "₹{:.2f}",
                     "P/L": "₹{:.2f}",
                     "P/L %": "{:.2f}%"
-                }).applymap(lambda x: 'color: green' if x > 0 else 'color: red', subset=['P/L', 'P/L %']),
+                }).applymap(lambda x: 'color: #00e676' if x > 0 else 'color: #ff1744', subset=['P/L', 'P/L %']),
                 use_container_width=True)
                 
-                if st.button("Clear Portfolio"):
+                if st.button("Clear Portfolio", type="secondary"):
                     st.session_state.portfolio = []
                     st.rerun()
             else:
-                st.info("Your portfolio is empty. Add a stock above to track performance.")
-
+                st.info("Portfolio is empty.")
     else:
         st.error("Error loading data.")
