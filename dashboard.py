@@ -539,12 +539,6 @@ if ticker:
                         if results:
                             selected_label = st.selectbox("Select Stock", options=results.keys(), key="pf_select_box")
                             chosen_ticker = results[selected_label]
-                            
-                            if st.button(f"⚡ Set Dashboard to {chosen_ticker}"):
-                                st.session_state['ticker'] = chosen_ticker
-                                st.session_state.search_key_trigger += 1
-                                st.toast(f"Dashboard updated to {chosen_ticker}!", icon="⚡")
-                                st.rerun()
                         else:
                             st.warning("No Indian stocks found.")
                             
@@ -567,7 +561,6 @@ if ticker:
                         st.session_state.last_pf_ticker = chosen_ticker
 
                 st.divider()
-
                 st.caption("Step 2: Confirm Details")
                 
                 c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
@@ -582,6 +575,7 @@ if ticker:
                     st.write("") 
                     st.write("")
                     # --- FIXED SECTION START ---
+                    # We ONLY update the portfolio list, NOT the global dashboard ticker.
                     if st.button("Add"):
                         if new_ticker and new_price > 0:
                             st.session_state.portfolio.append({
@@ -589,12 +583,9 @@ if ticker:
                                 "Quantity": new_qty,
                                 "Buy Price": new_price
                             })
-                            
-                            st.session_state['ticker'] = new_ticker
-                            st.session_state.search_key_trigger += 1
-                            
                             st.toast(f"Added {new_ticker} to Portfolio!", icon="✅")
-                            # REMOVED st.rerun() HERE TO PREVENT TAB RESET
+                            # No st.rerun() here.
+                            # No st.session_state['ticker'] update here.
                         else:
                             st.error("Invalid Ticker")
                     # --- FIXED SECTION END ---
