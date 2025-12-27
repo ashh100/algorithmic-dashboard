@@ -73,7 +73,6 @@ def get_ai_analysis(ticker, data):
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
-    # We use gemini-pro (or 1.5-flash) based on what worked for you previously
     prompt = f"""
     Act as a senior technical analyst. Analyze this stock data for {ticker}.
     Current Price: {current_price}
@@ -89,8 +88,7 @@ def get_ai_analysis(ticker, data):
     Keep it concise, professional, and use bullet points. Max 100 words.
     """
     try:
-        # Using the model that worked for you last time
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
@@ -112,6 +110,14 @@ def get_stock_data(ticker, period):
     
     return df
 
+@st.cache_data(ttl=86400) # Cache company info for 24 hours
+def get_company_info(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.info
+    except:
+        return None
+
 # 2. Sidebar - Inputs
 st.sidebar.header("Controls")
 search_query = st.sidebar.text_input("Search Company", "Tata")
@@ -129,7 +135,35 @@ else:
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
+# --- FUNDAMENTALS SECTION (NEW) ---
+if ticker:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🏢 Fundamentals")
+    info = get_company_info(ticker)
+    
+    if info:
+        sector = info.get('sector', 'N/A')
+        pe_ratio = info.get('trailingPE', 'N/A')
+        market_cap = info.get('marketCap', 0)
+        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        
+        # Format Market Cap (Trillions/Billions)
+        if market_cap > 1e12:
+            mcap_str = f"₹{market_cap/1e12:.2f}T"
+        elif market_cap > 1e9:
+            mcap_str = f"₹{market_cap/1e9:.2f}B"
+        else:
+            mcap_str = f"₹{market_cap/1e6:.2f}M"
+
+        st.sidebar.info(f"**Sector:** {sector}")
+        st.sidebar.metric("Market Cap", mcap_str)
+        st.sidebar.metric("P/E Ratio", f"{pe_ratio}")
+        st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
+    else:
+        st.sidebar.warning("Fundamental data not available")
+
 # --- CHART STYLE SELECTOR ---
+st.sidebar.markdown("---")
 st.sidebar.subheader("Chart Display")
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
 
@@ -150,13 +184,11 @@ if ticker:
         current_price = df['Close'].iloc[-1]
         
         # --- AUTO SENSITIVITY ENGINE (SILENT) ---
-        # Calculates the best sensitivity 'n' but doesn't print it.
         valid_n = []
         for n_scan in range(5, 45, 2): 
             count = count_levels(df, n_scan, current_price)
             if 3 <= count <= 6: valid_n.append(n_scan)
         
-        # If we found a good range, pick the middle value. Else default to 10.
         if valid_n:
             optimal_n = int(sum(valid_n) / len(valid_n))
         else:
@@ -167,8 +199,6 @@ if ticker:
         show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
-        
-        # We pass 'optimal_n' as the default 'value' here
         sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
 
         # Metrics
