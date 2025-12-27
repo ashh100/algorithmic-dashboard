@@ -73,6 +73,7 @@ def get_ai_analysis(ticker, data):
     recent_data = data.tail(10).to_string()
     current_price = data['Close'].iloc[-1]
     
+    # We use gemini-pro (or 1.5-flash) based on what worked for you previously
     prompt = f"""
     Act as a senior technical analyst. Analyze this stock data for {ticker}.
     Current Price: {current_price}
@@ -88,7 +89,8 @@ def get_ai_analysis(ticker, data):
     Keep it concise, professional, and use bullet points. Max 100 words.
     """
     try:
-        model = genai.GenerativeModel('models/gemini-2.5-flash')
+        # Using the model that worked for you last time
+        model = genai.GenerativeModel('gemini-1.5-flash') 
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
@@ -147,22 +149,27 @@ if ticker:
         df = df[df['Volume'] > 0]
         current_price = df['Close'].iloc[-1]
         
-        # Recommendation Engine
+        # --- AUTO SENSITIVITY ENGINE (SILENT) ---
+        # Calculates the best sensitivity 'n' but doesn't print it.
         valid_n = []
         for n_scan in range(5, 45, 2): 
             count = count_levels(df, n_scan, current_price)
             if 3 <= count <= 6: valid_n.append(n_scan)
         
-        rec_msg = f"💡 Rec. Range: {min(valid_n)} - {max(valid_n)}" if valid_n else "⚠️ Market is noisy"
-        rec_color = "green" if valid_n else "orange"
+        # If we found a good range, pick the middle value. Else default to 10.
+        if valid_n:
+            optimal_n = int(sum(valid_n) / len(valid_n))
+        else:
+            optimal_n = 10
 
         # Sidebar Settings
-        st.sidebar.markdown(f":{rec_color}[{rec_msg}]")
         st.sidebar.caption("Overlays")
         show_ema = st.sidebar.checkbox("Show EMA (20/50)", value=True)
         show_support = st.sidebar.checkbox("Show Support", value=True)
         show_resistance = st.sidebar.checkbox("Show Resistance", value=True)
-        sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, 10)
+        
+        # We pass 'optimal_n' as the default 'value' here
+        sensitivity = st.sidebar.number_input("Sensitivity", 2, 50, optimal_n)
 
         # Metrics
         df['RSI'] = calculate_rsi(df['Close'])
