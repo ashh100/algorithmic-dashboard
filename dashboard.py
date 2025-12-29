@@ -244,26 +244,60 @@ def get_market_comparison(ticker, period):
         return None, 0
 
 
+import yfinance as yf
+from nsepython import nse_eq
+
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
-        # Clean ticker: RELIANCE.NS -> RELIANCE
+        # 1. CLEANUP SYMBOL
         symbol = ticker.replace(".NS", "").replace(".BO", "")
         
-        # nse_eq handles the headers/cookies for you automatically
-        data = nse_eq(symbol)
-        
-        # NSE stores data in nested dictionaries
-        meta = data.get("metadata", {})
-        trade_info = data.get("marketDeptOrderBook", {}).get("tradeInfo", {})
-        
-        return {
-            "sector": meta.get("industry", "N/A"),
-            "marketCap": trade_info.get("totalMarketCap", 0),
-            "trailingPE": meta.get("pdSymbolCustomVIC", "N/A"), # NSE's key for PE
-            "dividendYield": meta.get("lastPrice", 0), # Usually requires manual calc or specific key
-            "faceValue": meta.get("faceValue", "N/A")
+        # 2. DEFAULT DICT
+        base_data = {
+            "sector": "N/A",
+            "marketCap": 0,
+            "trailingPE": "N/A",
+            "dividendYield": 0.0
         }
+
+        # 3. PRIMARY: FETCH FROM NSE (Best for PE & Market Cap)
+        try:
+            nse_json = nse_eq(symbol)
+            meta = nse_json.get("metadata", {})
+            trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
+            
+            # Extract NSE Data
+            if 'industry' in meta: 
+                base_data['sector'] = meta['industry']
+            if 'pdSymbolPe' in meta: 
+                base_data['trailingPE'] = meta['pdSymbolPe']
+            if 'totalMarketCap' in trade_info: 
+                # NSE gives market cap in Lakhs, converting to actual value
+                base_data['marketCap'] = trade_info['totalMarketCap'] * 100000 
+        except Exception as e:
+            print(f"NSE Fetch Failed: {e}")
+
+        # 4. BACKUP/SUPPLEMENT: FETCH FROM YFINANCE (Best for Dividend Yield)
+        try:
+            # We use yfinance to get the Dividend Yield because NSE often hides it
+            yf_ticker = yf.Ticker(ticker)
+            yf_info = yf_ticker.info
+            
+            # Get Dividend Yield
+            dy = yf_info.get("dividendYield")
+            if dy is not None:
+                base_data['dividendYield'] = dy * 100  # Convert 0.015 -> 1.5%
+            
+            # Failsafe: If NSE PE failed, try YFinance PE
+            if base_data['trailingPE'] == "N/A":
+                base_data['trailingPE'] = yf_info.get("trailingPE", "N/A")
+                
+        except Exception as e:
+            print(f"YF Fetch Failed: {e}")
+
+        return base_data
+
     except Exception as e:
         return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0}
 # --- NEWS ---
