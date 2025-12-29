@@ -178,44 +178,49 @@ def calculate_optimal_sensitivity(df):
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     stock = yf.Ticker(ticker)
-    info = {}
-    
-    # 1. Try yfinance first
+    info = None
     try: 
         info = stock.info
-        # If yfinance actually worked, return it immediately
-        if info and info.get('trailingPE') and info.get('sector') != 'N/A':
-            return info
     except Exception: 
         pass 
+    
+    if not info: info = {}
 
-    # 2. THE FIX: Fallback to Alpha Vantage for P/E and Div
-    # This is necessary because Yahoo often blocks these specific fields
-    try:
-        import requests
-        av_key = st.secrets["ALPHA_VANTAGE_KEY"]
-        # Clean ticker: RELIANCE.NS -> RELIANCE
-        clean_symbol = ticker.split('.')[0] 
-        url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_symbol}&apikey={av_key}"
-        res = requests.get(url, timeout=5).json()
-        
-        if res and "Sector" in res:
-            # We map AV names to the names your Sidebar code uses
-            info['sector'] = res.get("Sector", "N/A")
-            info['marketCap'] = float(res.get("MarketCapitalization", 0))
+    # If yfinance failed to get fundamental data, use Alpha Vantage Fallback
+    if 'marketCap' not in info or info.get('sector') == "N/A":
+        try:
+            import requests
+            # Accessing the key you put in .streamlit/secrets.toml
+            av_key = st.secrets["ALPHA_VANTAGE_KEY"]
+            clean_symbol = ticker.replace(".NS", "").replace(".BO", "")
+            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_symbol}&apikey={av_key}"
+            res = requests.get(url, timeout=5).json()
             
-            # Alpha Vantage returns "None" as a string if data is missing
-            pe = res.get("PERatio")
-            info['trailingPE'] = float(pe) if pe and pe != "None" else "N/A"
-            
-            dy = res.get("DividendYield")
-            info['dividendYield'] = float(dy) if dy and dy != "None" else 0.0
-            
-            return info
-    except Exception:
-        pass
+            if res and "Sector" in res:
+                info['sector'] = res.get("Sector", "N/A")
+                info['marketCap'] = float(res.get("MarketCapitalization", 0))
+                info['trailingPE'] = float(res.get("PERatio", 0)) if res.get("PERatio") != "None" else "N/A"
+                info['dividendYield'] = float(res.get("DividendYield", 0))
+        except Exception:
+            pass
+
+    # Your original fast_info logic as a secondary backup
+    if 'marketCap' not in info:
+        try:
+            fast = stock.fast_info
+            if fast and fast.market_cap:
+                info['marketCap'] = fast.market_cap
+        except Exception: 
+            pass
+
+    # Fill missing keys to prevent UI KeyErrors
+    if 'sector' not in info: info['sector'] = "N/A"
+    if 'trailingPE' not in info: info['trailingPE'] = "N/A"
+    if 'dividendYield' not in info: info['dividendYield'] = 0
+    if 'marketCap' not in info: info['marketCap'] = 0
 
     return info
+
 # --- COMPARISON ---
 @st.cache_data(ttl=3600)
 def get_market_comparison(ticker, period):
@@ -381,10 +386,10 @@ if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📍 {ticker}") 
     
-    # Fetch info using your updated get_company_info helper
+    # Fetch info using your helper function
     info = get_company_info(ticker)
     
-    # 1. Initialize safe defaults to prevent math crashes
+    # 1. CRITICAL: Initialize safe defaults to prevent crashes
     sector = "N/A"
     pe_ratio = "N/A"
     market_cap = 0
@@ -392,37 +397,33 @@ if ticker:
 
     if info:
         sector = info.get('sector', 'N/A')
-        # Use .get() but also check if the value is actually a number
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
         
-        # Handle Dividend Yield (Alpha Vantage often returns small decimals)
+        # Safely handle dividend yield
         dy = info.get('dividendYield')
-        if isinstance(dy, (int, float)):
-            # If dy is 0.015, we want to show 1.50%
-            div_yield = dy * 100 if dy < 1 else dy
-        else:
-            div_yield = 0.0
+        div_yield = (dy * 100) if isinstance(dy, (int, float)) else 0.0
     
     # 2. SAFE P/E FORMATTING
-    if isinstance(pe_ratio, (int, float)) and pe_ratio > 0:
+    if isinstance(pe_ratio, (int, float)):
         pe_str = f"{pe_ratio:.2f}"
     else:
         pe_str = "N/A"
 
-    # 3. SAFE MARKET CAP FORMATTING
+    # 3. SAFE MARKET CAP FORMATTING (Fixes TypeError in image_52da2a.png)
+    # We explicitly check if it's a number before doing the math comparisons
     if isinstance(market_cap, (int, float)) and market_cap > 0:
         if market_cap >= 1e12: 
             mcap_str = f"₹{market_cap/1e12:.2f}T"
         elif market_cap >= 1e7: 
-            # Crores is the standard for NSE/BSE
+            # Using Crore (Cr) is more standard for Indian Markets
             mcap_str = f"₹{market_cap/1e7:.2f} Cr"
         else:
             mcap_str = f"₹{market_cap:,.0f}"
     else:
         mcap_str = "N/A"
 
-    # 4. FINAL UI DISPLAY
+    # 4. UI DISPLAY
     st.sidebar.info(f"**Sector:** {sector}")
     st.sidebar.metric("Market Cap", mcap_str)
     st.sidebar.metric("P/E Ratio", pe_str)
