@@ -179,19 +179,47 @@ def calculate_optimal_sensitivity(df):
 def get_company_info(ticker):
     stock = yf.Ticker(ticker)
     info = None
-    try: info = stock.info
-    except Exception: pass 
+    try: 
+        info = stock.info
+    except Exception: 
+        pass 
+    
     if not info: info = {}
+
+    # If yfinance failed to get fundamental data, use Alpha Vantage Fallback
+    if 'marketCap' not in info or info.get('sector') == "N/A":
+        try:
+            import requests
+            # Accessing the key you put in .streamlit/secrets.toml
+            av_key = st.secrets["ALPHA_VANTAGE_KEY"]
+            clean_symbol = ticker.replace(".NS", "").replace(".BO", "")
+            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_symbol}&apikey={av_key}"
+            res = requests.get(url, timeout=5).json()
+            
+            if res and "Sector" in res:
+                info['sector'] = res.get("Sector", "N/A")
+                info['marketCap'] = float(res.get("MarketCapitalization", 0))
+                info['trailingPE'] = float(res.get("PERatio", 0)) if res.get("PERatio") != "None" else "N/A"
+                info['dividendYield'] = float(res.get("DividendYield", 0))
+        except Exception:
+            pass
+
+    # Your original fast_info logic as a secondary backup
     if 'marketCap' not in info:
         try:
             fast = stock.fast_info
             if fast and fast.market_cap:
                 info['marketCap'] = fast.market_cap
-                if 'sector' not in info: info['sector'] = "N/A"
-                if 'trailingPE' not in info: info['trailingPE'] = "N/A"
-                if 'dividendYield' not in info: info['dividendYield'] = 0
-        except Exception: pass
-    return info if ('marketCap' in info or 'sector' in info) else None
+        except Exception: 
+            pass
+
+    # Fill missing keys to prevent UI KeyErrors
+    if 'sector' not in info: info['sector'] = "N/A"
+    if 'trailingPE' not in info: info['trailingPE'] = "N/A"
+    if 'dividendYield' not in info: info['dividendYield'] = 0
+    if 'marketCap' not in info: info['marketCap'] = 0
+
+    return info
 
 # --- COMPARISON ---
 @st.cache_data(ttl=3600)
@@ -283,9 +311,37 @@ def get_ai_analysis(ticker, data, news_list):
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
     stock = yf.Ticker(ticker)
-    df = stock.history(period=period)
-    if df.empty: return df
     
+    # --- PART 1: PRICE HISTORY (Kept Original) ---
+    df = stock.history(period=period)
+    if df.empty: 
+        return df, {"sector": "N/A", "pe": "N/A", "mcap": "N/A"}
+    
+    # --- PART 2: FUNDAMENTALS (New Safe Fallback) ---
+    fundamentals = {"sector": "N/A", "pe": "N/A", "mcap": "N/A"}
+    try:
+        # Try yfinance first (using .info)
+        info = stock.info
+        fundamentals["sector"] = info.get('sector', 'N/A')
+        fundamentals["pe"] = info.get('trailingPE', 'N/A')
+        fundamentals["mcap"] = info.get('marketCap', 'N/A')
+        
+        # If yfinance failed to get a sector, try Alpha Vantage secret
+        if fundamentals["sector"] == "N/A" and "ALPHA_VANTAGE_KEY" in st.secrets:
+            import requests
+            clean_symbol = ticker.replace(".NS", "").replace(".BO", "")
+            av_key = st.secrets["ALPHA_VANTAGE_KEY"]
+            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_symbol}&apikey={av_key}"
+            res = requests.get(url, timeout=5).json()
+            if "Sector" in res:
+                fundamentals["sector"] = res.get("Sector", "N/A")
+                fundamentals["pe"] = res.get("PERatio", "N/A")
+                mcap_raw = float(res.get("MarketCapitalization", 0))
+                fundamentals["mcap"] = mcap_raw if mcap_raw > 0 else "N/A"
+    except Exception:
+        pass # If everything fails, we still have "N/A" defaults
+
+    # --- PART 3: TECHNICALS (Kept Original Variable Names) ---
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Pct_Change'] = df['Close'].pct_change()
@@ -301,7 +357,8 @@ def get_stock_data(ticker, period):
     df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
     df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
     
-    return df
+    # IMPORTANT: Returning both the DF and the Fundamentals dict
+    return df, fundamentals
 
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
@@ -329,36 +386,52 @@ if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📍 {ticker}") 
     
+    # This calls your function which now includes the Alpha Vantage fallback
     info = get_company_info(ticker)
     
+    # Initialize defaults to prevent crashes if info is None or empty
+    sector = "N/A"
+    pe_ratio = "N/A"
+    market_cap = 0
+    div_yield = 0.0
+
     if info:
         sector = info.get('sector', 'N/A')
-    # Use .get() with a default value to prevent KeyErrors
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
-        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        
+        # Safe dividend yield calculation
+        dy = info.get('dividendYield')
+        div_yield = (dy * 100) if isinstance(dy, (int, float)) else 0.0
     
-    # Check if PE is a valid number before formatting
+    # --- SAFE P/E FORMATTING ---
     if isinstance(pe_ratio, (int, float)):
         pe_str = f"{pe_ratio:.2f}"
     else:
         pe_str = "N/A"
 
-    # Handle different sizes of Market Cap
-    if market_cap and market_cap > 0:
-        if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
-        elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
-        else: mcap_str = f"₹{market_cap/1e6:.2f}M"
+    # --- SAFE MARKET CAP FORMATTING (Fixes the TypeError) ---
+    # We check if market_cap is a number before doing math
+    if isinstance(market_cap, (int, float)) and market_cap > 0:
+        if market_cap >= 1e12: 
+            mcap_str = f"₹{market_cap/1e12:.2f}T"
+        elif market_cap >= 1e7: 
+            # Added Crore (Cr) formatting which is more standard for NSE
+            mcap_str = f"₹{market_cap/1e7:.2f} Cr"
+        elif market_cap >= 1e5:
+            mcap_str = f"₹{market_cap/1e5:.2f} L"
+        else:
+            mcap_str = f"₹{market_cap:,.0f}"
     else:
         mcap_str = "N/A"
 
+    # --- UI DISPLAY ---
     st.sidebar.info(f"**Sector:** {sector}")
     st.sidebar.metric("Market Cap", mcap_str)
     st.sidebar.metric("P/E Ratio", pe_str)
     st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
 else:
-        st.sidebar.warning("Fundamental data not available")
-
+    st.sidebar.warning("Fundamental data not available")
 st.sidebar.markdown("---")
 st.sidebar.subheader("Chart Display")
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
@@ -369,7 +442,7 @@ st.sidebar.button("Generate Report", on_click=run_ai_analysis)
 
 # --- MAIN DASHBOARD LOGIC ---
 if ticker:
-    df = get_stock_data(ticker, period) 
+    df, info_data = get_stock_data(ticker, period)
     
     if not df.empty:
         if not df[df['Volume'] > 0].empty:
