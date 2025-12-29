@@ -241,7 +241,30 @@ def get_market_comparison(ticker, period):
         return normalized, correlation
     except Exception as e:
         return None, 0
+from nsepython import nse_eq
 
+@st.cache_data(ttl=86400)
+def get_nse_fundamentals(ticker):
+    try:
+        # Clean ticker: RELIANCE.NS -> RELIANCE
+        symbol = ticker.replace(".NS", "").replace(".BO", "")
+        
+        # nse_eq handles the headers/cookies for you automatically
+        data = nse_eq(symbol)
+        
+        # NSE stores data in nested dictionaries
+        meta = data.get("metadata", {})
+        trade_info = data.get("marketDeptOrderBook", {}).get("tradeInfo", {})
+        
+        return {
+            "sector": meta.get("industry", "N/A"),
+            "marketCap": trade_info.get("totalMarketCap", 0),
+            "trailingPE": meta.get("pdSymbolCustomVIC", "N/A"), # NSE's key for PE
+            "dividendYield": meta.get("lastPrice", 0), # Usually requires manual calc or specific key
+            "faceValue": meta.get("faceValue", "N/A")
+        }
+    except Exception as e:
+        return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0}
 # --- NEWS ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
@@ -387,8 +410,8 @@ if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📍 {ticker}") 
     
-    # 1. Fetch info using your get_company_info helper (Line 263)
-    info = get_company_info(ticker)
+    # 1. Fetch info using the NEW NSE helper (Ensure you have renamed/updated your function)
+    info = get_nse_fundamentals(ticker)
     
     # 2. Initialize safe defaults to prevent crashes
     sector = "N/A"
@@ -397,7 +420,7 @@ if ticker:
     div_yield = 0.0
 
     if info:
-        # Pull data using keys from your Alpha Vantage mapping
+        # UPDATED: Using NSE-specific keys
         sector = info.get('sector', 'N/A')
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
@@ -405,7 +428,8 @@ if ticker:
         # Safely handle dividend yield percentage
         dy = info.get('dividendYield')
         if isinstance(dy, (int, float)):
-            div_yield = dy * 100 if dy < 1 else dy
+            # NSE usually returns the actual percentage (e.g., 1.5)
+            div_yield = dy 
         else:
             div_yield = 0.0
     
@@ -415,14 +439,12 @@ if ticker:
     else:
         pe_str = "N/A"
 
-    # 4. SAFE MARKET CAP FORMATTING (Optimized for Indian Markets)
+    # 4. SAFE MARKET CAP FORMATTING (NSE returns values in Crores)
     if isinstance(market_cap, (int, float)) and market_cap > 0:
-        if market_cap >= 1e12: 
-            mcap_str = f"₹{market_cap/1e12:.2f}T"
-        elif market_cap >= 1e7: 
-            mcap_str = f"₹{market_cap/1e7:.2f} Cr"
+        if market_cap >= 100000: # If > 1 Lakh Cr
+            mcap_str = f"₹{market_cap/100000:.2f} Lakh Cr"
         else:
-            mcap_str = f"₹{market_cap:,.0f}"
+            mcap_str = f"₹{market_cap:,.2f} Cr"
     else:
         mcap_str = "N/A"
 
@@ -433,6 +455,7 @@ if ticker:
     st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
 else:
     st.sidebar.warning("Select a company to see fundamentals.")
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("Chart Display")
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
