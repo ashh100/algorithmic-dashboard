@@ -6,6 +6,7 @@ from plotly.subplots import make_subplots
 import numpy as np
 import requests
 import xml.etree.ElementTree as ET
+from nsepython import nse_eq
 
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
@@ -241,7 +242,7 @@ def get_market_comparison(ticker, period):
         return normalized, correlation
     except Exception as e:
         return None, 0
-from nsepython import nse_eq
+
 
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
