@@ -167,36 +167,54 @@ def calculate_optimal_sensitivity(df):
     return best_n
 
 # --- FUNDAMENTALS ---
-@st.cache_data(ttl=86400) 
+@st.cache_data(ttl=86400)
 def get_company_info(ticker):
-    stock = yf.Ticker(ticker)
-    info = {}
-    try: 
-        # Get the standard info dict
-        info = stock.info
-        
-        # Fallback for missing P/E and Dividend Yield using fast_info
-        fast = stock.fast_info
-        
-        if info.get('trailingPE') is None or info.get('trailingPE') == 'N/A':
-            # Use fast_info or calculate roughly if possible
-            info['trailingPE'] = info.get('trailingPE', "N/A")
+    info = {
+        "sector": "N/A",
+        "marketCap": None,
+        "trailingPE": None,
+        "dividendYield": None,
+    }
 
-        if info.get('dividendYield') is None or info.get('dividendYield') == 0:
-            # fast_info doesn't always have yield, but we ensure it's at least 0 if missing
-            info['dividendYield'] = info.get('dividendYield', 0)
+    try:
+        # Try fast_info first (cheap + reliable for price/MC)
+        stock = yf.Ticker(ticker)
+        fast = getattr(stock, "fast_info", {})
 
-        if 'marketCap' not in info or not info['marketCap']:
-            info['marketCap'] = fast.market_cap
-            
-    except Exception: 
-        pass 
+        if hasattr(fast, "market_cap") and fast.market_cap:
+            info["marketCap"] = fast.market_cap
 
-    # Final check: If it's still empty, let's try to grab the most basic keys manually
-    if not info or 'sector' not in info:
-        info['sector'] = info.get('sector', "Financial Services" if ".NS" in ticker else "N/A")
-        
+        # ---- Yahoo Finance fundamental API (more reliable for NSE) ----
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules=summaryDetail,price,assetProfile"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json()["quoteSummary"]["result"][0]
+
+        # Sector
+        if "assetProfile" in data:
+            info["sector"] = data["assetProfile"].get("sector", "N/A")
+
+        sd = data.get("summaryDetail", {})
+        price = data.get("price", {})
+
+        # Market Cap
+        if not info["marketCap"]:
+            mc = price.get("marketCap", {}) or sd.get("marketCap", {})
+            info["marketCap"] = mc.get("raw")
+
+        # P/E Ratio
+        pe = sd.get("trailingPE", {})
+        info["trailingPE"] = pe.get("raw")
+
+        # Dividend Yield
+        dy = sd.get("dividendYield", {})
+        info["dividendYield"] = dy.get("raw", 0)
+
+    except Exception:
+        pass
+
     return info
+
 
 # --- COMPARISON ---
 @st.cache_data(ttl=3600)
