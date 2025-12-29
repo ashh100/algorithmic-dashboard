@@ -338,15 +338,25 @@ if ticker:
     
     if info:
         sector = info.get('sector', 'N/A')
-        pe_ratio = info.get('trailingPE', 'N/A')
+        # Use .get() with a default of None to check if data exists
+        pe_ratio = info.get('trailingPE')
         market_cap = info.get('marketCap', 0)
-        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
+        # Dividend yield is often a very small decimal (0.015 = 1.5%)
+        div_yield = info.get('dividendYield')
         
-        if pe_ratio != 'N/A':
-            pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
+        # Logic for P/E Ratio String
+        if pe_ratio and isinstance(pe_ratio, (int, float)):
+            pe_str = f"{pe_ratio:.2f}"
         else:
             pe_str = "N/A"
 
+        # Logic for Dividend Yield String
+        if div_yield and isinstance(div_yield, (int, float)):
+            div_str = f"{div_yield * 100:.2f}%"
+        else:
+            div_str = "0.00%"
+
+        # Market Cap Formatting
         if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
         elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
         else: mcap_str = f"₹{market_cap/1e6:.2f}M"
@@ -354,7 +364,7 @@ if ticker:
         st.sidebar.info(f"**Sector:** {sector}")
         st.sidebar.metric("Market Cap", mcap_str)
         st.sidebar.metric("P/E Ratio", pe_str)
-        st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
+        st.sidebar.metric("Div Yield", div_str)
     else:
         st.sidebar.warning("Fundamental data not available")
 
