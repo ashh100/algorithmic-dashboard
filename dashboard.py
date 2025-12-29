@@ -386,44 +386,46 @@ if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📍 {ticker}") 
     
-    # Fetch info using your helper function
+    # 1. Fetch info using your get_company_info helper (Line 263)
     info = get_company_info(ticker)
     
-    # 1. CRITICAL: Initialize safe defaults to prevent crashes
+    # 2. Initialize safe defaults to prevent crashes
     sector = "N/A"
     pe_ratio = "N/A"
     market_cap = 0
     div_yield = 0.0
 
     if info:
+        # Pull data using keys from your Alpha Vantage mapping
         sector = info.get('sector', 'N/A')
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
         
-        # Safely handle dividend yield
+        # Safely handle dividend yield percentage
         dy = info.get('dividendYield')
-        div_yield = (dy * 100) if isinstance(dy, (int, float)) else 0.0
+        if isinstance(dy, (int, float)):
+            div_yield = dy * 100 if dy < 1 else dy
+        else:
+            div_yield = 0.0
     
-    # 2. SAFE P/E FORMATTING
-    if isinstance(pe_ratio, (int, float)):
+    # 3. SAFE P/E FORMATTING
+    if isinstance(pe_ratio, (int, float)) and pe_ratio > 0:
         pe_str = f"{pe_ratio:.2f}"
     else:
         pe_str = "N/A"
 
-    # 3. SAFE MARKET CAP FORMATTING (Fixes TypeError in image_52da2a.png)
-    # We explicitly check if it's a number before doing the math comparisons
+    # 4. SAFE MARKET CAP FORMATTING (Optimized for Indian Markets)
     if isinstance(market_cap, (int, float)) and market_cap > 0:
         if market_cap >= 1e12: 
             mcap_str = f"₹{market_cap/1e12:.2f}T"
         elif market_cap >= 1e7: 
-            # Using Crore (Cr) is more standard for Indian Markets
             mcap_str = f"₹{market_cap/1e7:.2f} Cr"
         else:
             mcap_str = f"₹{market_cap:,.0f}"
     else:
         mcap_str = "N/A"
 
-    # 4. UI DISPLAY
+    # 5. UI DISPLAY
     st.sidebar.info(f"**Sector:** {sector}")
     st.sidebar.metric("Market Cap", mcap_str)
     st.sidebar.metric("P/E Ratio", pe_str)
