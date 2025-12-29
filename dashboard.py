@@ -440,8 +440,10 @@ if ticker:
         pe_str = "N/A"
 
     # 4. SAFE MARKET CAP FORMATTING (NSE returns values in Crores)
+    # 4. SAFE MARKET CAP FORMATTING (Fix for NSE Scale)
     if isinstance(market_cap, (int, float)) and market_cap > 0:
-        if market_cap >= 100000: # If > 1 Lakh Cr
+        # If the value from NSE is already large, it's likely in Crores
+        if market_cap >= 100000: 
             mcap_str = f"₹{market_cap/100000:.2f} Lakh Cr"
         else:
             mcap_str = f"₹{market_cap:,.2f} Cr"
