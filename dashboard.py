@@ -221,14 +221,21 @@ def get_company_info(ticker):
 
     return info
 
-# --- COMPARISON ---
+# --- COMPARISON (FIXED) ---
 @st.cache_data(ttl=3600)
 def get_market_comparison(ticker, period):
     try:
         tickers = [ticker, "^NSEI"]
-        data = yf.download(tickers, period=period)['Close']
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
+        # Explicitly select 'Close' and handle multi-indexing
+        data = yf.download(tickers, period=period, progress=False)['Close']
+        
+        if data.empty:
+            return None, 0
+            
+        # Ensure it's a DataFrame and not a Series
+        if isinstance(data, pd.Series):
+            return None, 0
+
         normalized = (data / data.iloc[0] - 1) * 100
         correlation = data.corr().iloc[0, 1]
         return normalized, correlation
@@ -307,41 +314,36 @@ def get_ai_analysis(ticker, data, news_list):
     except Exception as e:
         return f"Connection Error: {str(e)}"
 
-# --- DATA FETCHING ---
+# --- DATA FETCHING (FIXED) ---
 @st.cache_data(ttl=300) 
 def get_stock_data(ticker, period):
     stock = yf.Ticker(ticker)
     
-    # --- PART 1: PRICE HISTORY (Kept Original) ---
+    # Fetch data
     df = stock.history(period=period)
-    if df.empty: 
-        return df, {"sector": "N/A", "pe": "N/A", "mcap": "N/A"}
     
-    # --- PART 2: FUNDAMENTALS (New Safe Fallback) ---
+    # FIX: If yfinance returns multi-index columns, flatten them
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    if df.empty: 
+        # Return an empty DF with columns and a default dict to avoid unpacking errors
+        empty_df = pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
+        return empty_df, {"sector": "N/A", "pe": "N/A", "mcap": "N/A"}
+    
+    # --- FUNDAMENTALS ---
     fundamentals = {"sector": "N/A", "pe": "N/A", "mcap": "N/A"}
     try:
-        # Try yfinance first (using .info)
         info = stock.info
         fundamentals["sector"] = info.get('sector', 'N/A')
         fundamentals["pe"] = info.get('trailingPE', 'N/A')
         fundamentals["mcap"] = info.get('marketCap', 'N/A')
-        
-        # If yfinance failed to get a sector, try Alpha Vantage secret
-        if fundamentals["sector"] == "N/A" and "ALPHA_VANTAGE_KEY" in st.secrets:
-            import requests
-            clean_symbol = ticker.replace(".NS", "").replace(".BO", "")
-            av_key = st.secrets["ALPHA_VANTAGE_KEY"]
-            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_symbol}&apikey={av_key}"
-            res = requests.get(url, timeout=5).json()
-            if "Sector" in res:
-                fundamentals["sector"] = res.get("Sector", "N/A")
-                fundamentals["pe"] = res.get("PERatio", "N/A")
-                mcap_raw = float(res.get("MarketCapitalization", 0))
-                fundamentals["mcap"] = mcap_raw if mcap_raw > 0 else "N/A"
-    except Exception:
-        pass # If everything fails, we still have "N/A" defaults
+    except:
+        pass
 
-    # --- PART 3: TECHNICALS (Kept Original Variable Names) ---
+    # --- TECHNICALS ---
+    # Use .copy() to avoid SettingWithCopy warnings
+    df = df.copy()
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Pct_Change'] = df['Close'].pct_change()
@@ -357,7 +359,6 @@ def get_stock_data(ticker, period):
     df['Upper_Band'] = df['SMA_20'] + (df['STD_20'] * 2)
     df['Lower_Band'] = df['SMA_20'] - (df['STD_20'] * 2)
     
-    # IMPORTANT: Returning both the DF and the Fundamentals dict
     return df, fundamentals
 
 # --- SIDEBAR & CONTROLS ---
