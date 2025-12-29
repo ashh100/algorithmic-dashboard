@@ -386,10 +386,10 @@ if ticker:
     st.sidebar.markdown("---")
     st.sidebar.subheader(f"📍 {ticker}") 
     
-    # This calls your function which now includes the Alpha Vantage fallback
+    # Fetch info using your helper function
     info = get_company_info(ticker)
     
-    # Initialize defaults to prevent crashes if info is None or empty
+    # 1. CRITICAL: Initialize safe defaults to prevent crashes
     sector = "N/A"
     pe_ratio = "N/A"
     market_cap = 0
@@ -400,38 +400,36 @@ if ticker:
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
         
-        # Safe dividend yield calculation
+        # Safely handle dividend yield
         dy = info.get('dividendYield')
         div_yield = (dy * 100) if isinstance(dy, (int, float)) else 0.0
     
-    # --- SAFE P/E FORMATTING ---
+    # 2. SAFE P/E FORMATTING
     if isinstance(pe_ratio, (int, float)):
         pe_str = f"{pe_ratio:.2f}"
     else:
         pe_str = "N/A"
 
-    # --- SAFE MARKET CAP FORMATTING (Fixes the TypeError) ---
-    # We check if market_cap is a number before doing math
+    # 3. SAFE MARKET CAP FORMATTING (Fixes TypeError in image_52da2a.png)
+    # We explicitly check if it's a number before doing the math comparisons
     if isinstance(market_cap, (int, float)) and market_cap > 0:
         if market_cap >= 1e12: 
             mcap_str = f"₹{market_cap/1e12:.2f}T"
         elif market_cap >= 1e7: 
-            # Added Crore (Cr) formatting which is more standard for NSE
+            # Using Crore (Cr) is more standard for Indian Markets
             mcap_str = f"₹{market_cap/1e7:.2f} Cr"
-        elif market_cap >= 1e5:
-            mcap_str = f"₹{market_cap/1e5:.2f} L"
         else:
             mcap_str = f"₹{market_cap:,.0f}"
     else:
         mcap_str = "N/A"
 
-    # --- UI DISPLAY ---
+    # 4. UI DISPLAY
     st.sidebar.info(f"**Sector:** {sector}")
     st.sidebar.metric("Market Cap", mcap_str)
     st.sidebar.metric("P/E Ratio", pe_str)
     st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
 else:
-    st.sidebar.warning("Fundamental data not available")
+    st.sidebar.warning("Select a company to see fundamentals.")
 st.sidebar.markdown("---")
 st.sidebar.subheader("Chart Display")
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
