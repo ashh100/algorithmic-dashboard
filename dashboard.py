@@ -53,19 +53,27 @@ def search_tickers(query):
         return {}
 
 def is_support(df, i, n):
-    for k in range(1, n+1):
-        if i-k < 0 or i+k >= len(df): continue
-        if df['Low'][i] >= df['Low'][i-k] or df['Low'][i] >= df['Low'][i+k]:
-            return False
-    return True
+    try:
+        # Using .iloc ensures we look at the row position, not the Date index
+        for k in range(1, n+1):
+            if i-k < 0 or i+k >= len(df): 
+                return False
+            if df['Low'].iloc[i] >= df['Low'].iloc[i-k] or df['Low'].iloc[i] >= df['Low'].iloc[i+k]:
+                return False
+        return True
+    except Exception:
+        return False
 
 def is_resistance(df, i, n):
-    for k in range(1, n+1): 
-        if i-k < 0 or i+k >= len(df): continue
-        if df['High'][i] <= df['High'][i-k] or df['High'][i] <= df['High'][i+k]:
-            return False
-    return True
-
+    try:
+        for k in range(1, n+1): 
+            if i-k < 0 or i+k >= len(df): 
+                return False
+            if df['High'].iloc[i] <= df['High'].iloc[i-k] or df['High'].iloc[i] <= df['High'].iloc[i+k]:
+                return False
+        return True
+    except Exception:
+        return False
 def calculate_rsi(data, window=14):
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
@@ -167,54 +175,23 @@ def calculate_optimal_sensitivity(df):
     return best_n
 
 # --- FUNDAMENTALS ---
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400) 
 def get_company_info(ticker):
-    info = {
-        "sector": "N/A",
-        "marketCap": None,
-        "trailingPE": None,
-        "dividendYield": None,
-    }
-
-    try:
-        # Try fast_info first (cheap + reliable for price/MC)
-        stock = yf.Ticker(ticker)
-        fast = getattr(stock, "fast_info", {})
-
-        if hasattr(fast, "market_cap") and fast.market_cap:
-            info["marketCap"] = fast.market_cap
-
-        # ---- Yahoo Finance fundamental API (more reliable for NSE) ----
-        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules=summaryDetail,price,assetProfile"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=5)
-        data = r.json()["quoteSummary"]["result"][0]
-
-        # Sector
-        if "assetProfile" in data:
-            info["sector"] = data["assetProfile"].get("sector", "N/A")
-
-        sd = data.get("summaryDetail", {})
-        price = data.get("price", {})
-
-        # Market Cap
-        if not info["marketCap"]:
-            mc = price.get("marketCap", {}) or sd.get("marketCap", {})
-            info["marketCap"] = mc.get("raw")
-
-        # P/E Ratio
-        pe = sd.get("trailingPE", {})
-        info["trailingPE"] = pe.get("raw")
-
-        # Dividend Yield
-        dy = sd.get("dividendYield", {})
-        info["dividendYield"] = dy.get("raw", 0)
-
-    except Exception:
-        pass
-
-    return info
-
+    stock = yf.Ticker(ticker)
+    info = None
+    try: info = stock.info
+    except Exception: pass 
+    if not info: info = {}
+    if 'marketCap' not in info:
+        try:
+            fast = stock.fast_info
+            if fast and fast.market_cap:
+                info['marketCap'] = fast.market_cap
+                if 'sector' not in info: info['sector'] = "N/A"
+                if 'trailingPE' not in info: info['trailingPE'] = "N/A"
+                if 'dividendYield' not in info: info['dividendYield'] = 0
+        except Exception: pass
+    return info if ('marketCap' in info or 'sector' in info) else None
 
 # --- COMPARISON ---
 @st.cache_data(ttl=3600)
@@ -356,24 +333,30 @@ if ticker:
     
     if info:
         sector = info.get('sector', 'N/A')
+    # Use .get() with a default value to prevent KeyErrors
         pe_ratio = info.get('trailingPE', 'N/A')
         market_cap = info.get('marketCap', 0)
         div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
-        
-        if pe_ratio != 'N/A':
-            pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
-        else:
-            pe_str = "N/A"
+    
+    # Check if PE is a valid number before formatting
+    if isinstance(pe_ratio, (int, float)):
+        pe_str = f"{pe_ratio:.2f}"
+    else:
+        pe_str = "N/A"
 
+    # Handle different sizes of Market Cap
+    if market_cap and market_cap > 0:
         if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
         elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
         else: mcap_str = f"₹{market_cap/1e6:.2f}M"
-
-        st.sidebar.info(f"**Sector:** {sector}")
-        st.sidebar.metric("Market Cap", mcap_str)
-        st.sidebar.metric("P/E Ratio", pe_str)
-        st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
     else:
+        mcap_str = "N/A"
+
+    st.sidebar.info(f"**Sector:** {sector}")
+    st.sidebar.metric("Market Cap", mcap_str)
+    st.sidebar.metric("P/E Ratio", pe_str)
+    st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
+else:
         st.sidebar.warning("Fundamental data not available")
 
 st.sidebar.markdown("---")
