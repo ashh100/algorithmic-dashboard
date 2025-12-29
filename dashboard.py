@@ -178,46 +178,47 @@ def calculate_optimal_sensitivity(df):
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     stock = yf.Ticker(ticker)
-    info = {}
-    
-    try:
-        # Strategy 1: Standard Info (often empty for Indian stocks)
+    info = None
+    try: 
         info = stock.info
-    except:
-        info = {}
+    except Exception: 
+        pass 
+    
+    if not info: info = {}
 
-    # Strategy 2: Fast Info (Reliable for M-Cap)
-    try:
-        fast = stock.fast_info
-        if 'marketCap' not in info or not info.get('marketCap'):
-            info['marketCap'] = fast.get('market_cap', 0)
-        if 'lastPrice' not in info:
-            info['lastPrice'] = fast.get('last_price', 0)
-    except:
-        pass
-
-    # Strategy 3: Validation & Cleaning
-    # If trailingPE is missing, it's often because it's listed as 'forwardPE' 
-    # or nested in 'stats'
-    if not info.get('trailingPE'):
-        info['trailingPE'] = info.get('forwardPE', "N/A")
-
-    # Strategy 4: Handle Dividend Yield (Convert 0.015 to 1.5%)
-    dy = info.get('dividendYield', 0)
-    if dy is None: dy = 0
-    info['dividendYield'] = dy
-
-    # Final cleanup to ensure UI doesn't crash
-    defaults = {
-        'sector': 'Financial Services', # Common default for failed lookups
-        'marketCap': 0,
-        'trailingPE': 'N/A',
-        'dividendYield': 0
-    }
-    for key, val in defaults.items():
-        if key not in info or info[key] is None:
-            info[key] = val
+    # If yfinance failed to get fundamental data, use Alpha Vantage Fallback
+    if 'marketCap' not in info or info.get('sector') == "N/A":
+        try:
+            import requests
+            # Accessing the key you put in .streamlit/secrets.toml
+            av_key = st.secrets["ALPHA_VANTAGE_KEY"]
+            clean_symbol = ticker.replace(".NS", "").replace(".BO", "")
+            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={clean_symbol}&apikey={av_key}"
+            res = requests.get(url, timeout=5).json()
             
+            if res and "Sector" in res:
+                info['sector'] = res.get("Sector", "N/A")
+                info['marketCap'] = float(res.get("MarketCapitalization", 0))
+                info['trailingPE'] = float(res.get("PERatio", 0)) if res.get("PERatio") != "None" else "N/A"
+                info['dividendYield'] = float(res.get("DividendYield", 0))
+        except Exception:
+            pass
+
+    # Your original fast_info logic as a secondary backup
+    if 'marketCap' not in info:
+        try:
+            fast = stock.fast_info
+            if fast and fast.market_cap:
+                info['marketCap'] = fast.market_cap
+        except Exception: 
+            pass
+
+    # Fill missing keys to prevent UI KeyErrors
+    if 'sector' not in info: info['sector'] = "N/A"
+    if 'trailingPE' not in info: info['trailingPE'] = "N/A"
+    if 'dividendYield' not in info: info['dividendYield'] = 0
+    if 'marketCap' not in info: info['marketCap'] = 0
+
     return info
 
 # --- COMPARISON (FIXED) ---
