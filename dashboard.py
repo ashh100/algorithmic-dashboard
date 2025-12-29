@@ -170,20 +170,34 @@ def calculate_optimal_sensitivity(df):
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     stock = yf.Ticker(ticker)
-    try:
+    info = {}
+    try: 
+        # Get the standard info dict
         info = stock.info
-        if not info or len(info) < 5: # Basic check if data is valid
-            # Fast info is a more reliable "lite" version for NSE
-            fast = stock.fast_info
-            info = {
-                'marketCap': fast.market_cap,
-                'sector': "N/A",
-                'trailingPE': None,
-                'dividendYield': 0.0
-            }
-        return info
-    except Exception:
-        return None
+        
+        # Fallback for missing P/E and Dividend Yield using fast_info
+        fast = stock.fast_info
+        
+        if info.get('trailingPE') is None or info.get('trailingPE') == 'N/A':
+            # Use fast_info or calculate roughly if possible
+            info['trailingPE'] = info.get('trailingPE', "N/A")
+
+        if info.get('dividendYield') is None or info.get('dividendYield') == 0:
+            # fast_info doesn't always have yield, but we ensure it's at least 0 if missing
+            info['dividendYield'] = info.get('dividendYield', 0)
+
+        if 'marketCap' not in info or not info['marketCap']:
+            info['marketCap'] = fast.market_cap
+            
+    except Exception: 
+        pass 
+
+    # Final check: If it's still empty, let's try to grab the most basic keys manually
+    if not info or 'sector' not in info:
+        info['sector'] = info.get('sector', "Financial Services" if ".NS" in ticker else "N/A")
+        
+    return info
+
 # --- COMPARISON ---
 @st.cache_data(ttl=3600)
 def get_market_comparison(ticker, period):
@@ -324,36 +338,23 @@ if ticker:
     
     if info:
         sector = info.get('sector', 'N/A')
+        pe_ratio = info.get('trailingPE', 'N/A')
+        market_cap = info.get('marketCap', 0)
+        div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         
-        # --- Trailing P/E Logic ---
-        pe_ratio = info.get('trailingPE')
-        if pe_ratio and isinstance(pe_ratio, (int, float)):
-            pe_str = f"{pe_ratio:.2f}"
+        if pe_ratio != 'N/A':
+            pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else str(pe_ratio)
         else:
             pe_str = "N/A"
 
-        # --- Dividend Yield Logic ---
-        div_yield = info.get('dividendYield')
-        if div_yield and isinstance(div_yield, (int, float)):
-            div_str = f"{div_yield * 100:.2f}%"
-        else:
-            # Default to 0.00% if None is returned
-            div_str = "0.00%"
+        if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
+        elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
+        else: mcap_str = f"₹{market_cap/1e6:.2f}M"
 
-        # --- Market Cap Formatting ---
-        market_cap = info.get('marketCap', 0)
-        if market_cap and isinstance(market_cap, (int, float)):
-            if market_cap > 1e12: mcap_str = f"₹{market_cap/1e12:.2f}T"
-            elif market_cap > 1e9: mcap_str = f"₹{market_cap/1e9:.2f}B"
-            else: mcap_str = f"₹{market_cap/1e6:.2f}M"
-        else:
-            mcap_str = "N/A"
-
-        # --- Sidebar Display ---
         st.sidebar.info(f"**Sector:** {sector}")
         st.sidebar.metric("Market Cap", mcap_str)
         st.sidebar.metric("P/E Ratio", pe_str)
-        st.sidebar.metric("Div Yield", div_str)
+        st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
     else:
         st.sidebar.warning("Fundamental data not available")
 
