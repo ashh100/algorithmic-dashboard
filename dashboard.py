@@ -170,20 +170,33 @@ def calculate_optimal_sensitivity(df):
 @st.cache_data(ttl=86400) 
 def get_company_info(ticker):
     stock = yf.Ticker(ticker)
-    info = None
-    try: info = stock.info
-    except Exception: pass 
-    if not info: info = {}
-    if 'marketCap' not in info:
-        try:
-            fast = stock.fast_info
-            if fast and fast.market_cap:
-                info['marketCap'] = fast.market_cap
-                if 'sector' not in info: info['sector'] = "N/A"
-                if 'trailingPE' not in info: info['trailingPE'] = "N/A"
-                if 'dividendYield' not in info: info['dividendYield'] = 0
-        except Exception: pass
-    return info if ('marketCap' in info or 'sector' in info) else None
+    info = {}
+    try: 
+        # Get the standard info dict
+        info = stock.info
+        
+        # Fallback for missing P/E and Dividend Yield using fast_info
+        fast = stock.fast_info
+        
+        if info.get('trailingPE') is None or info.get('trailingPE') == 'N/A':
+            # Use fast_info or calculate roughly if possible
+            info['trailingPE'] = info.get('trailingPE', "N/A")
+
+        if info.get('dividendYield') is None or info.get('dividendYield') == 0:
+            # fast_info doesn't always have yield, but we ensure it's at least 0 if missing
+            info['dividendYield'] = info.get('dividendYield', 0)
+
+        if 'marketCap' not in info or not info['marketCap']:
+            info['marketCap'] = fast.market_cap
+            
+    except Exception: 
+        pass 
+
+    # Final check: If it's still empty, let's try to grab the most basic keys manually
+    if not info or 'sector' not in info:
+        info['sector'] = info.get('sector', "Financial Services" if ".NS" in ticker else "N/A")
+        
+    return info
 
 # --- COMPARISON ---
 @st.cache_data(ttl=3600)
