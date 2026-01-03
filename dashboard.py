@@ -251,6 +251,21 @@ from nsepython import nse_eq
 @st.cache_data(ttl=86400)
 
 
+# --- HELPER: FORMAT MARKET CAP ---
+def format_market_cap(value):
+    """Converts raw number to 'Lakh Cr' format."""
+    if value == 0:
+        return "N/A"
+    
+    # Value is usually in Rupees (absolute)
+    crores = value / 10000000  # Convert to Crores
+    
+    if crores >= 100000:
+        return f"₹{crores/100000:.2f} Lakh Cr"
+    else:
+        return f"₹{crores:.0f} Cr"
+
+# --- MAIN FUNDAMENTALS FUNCTION ---
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
@@ -264,61 +279,61 @@ def get_nse_fundamentals(ticker):
         }
 
         # 2. PRIMARY: FETCH FROM NSE
-        # We wrap this in a broad try/except because NSE scraping is fragile
         try:
             nse_json = nse_eq(symbol)
             meta = nse_json.get("metadata", {})
+            trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
             
-            # Sector
             if 'industry' in meta:
                 base_data['sector'] = meta['industry']
-            
-            # P/E Ratio
             if 'pdSymbolPe' in meta:
                 base_data['trailingPE'] = meta['pdSymbolPe']
-
-            # Market Cap (NSE gives it in Lakhs, e.g. 150000 -> 15,000 Cr)
-            trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
+            
+            # NSE Market Cap is in Lakhs, convert to absolute
             if 'totalMarketCap' in trade_info:
                 base_data['marketCap'] = trade_info['totalMarketCap'] * 100000
                 
         except Exception:
-            pass # If NSE fails, we rely on backups below
+            pass 
 
         # 3. BACKUP: FETCH FROM YFINANCE
-        # We create the object once
         yf_ticker = yf.Ticker(ticker)
         
-        # --- FIX 1: Market Cap using fast_info (Much more reliable) ---
+        # --- MARKET CAP (Backup) ---
         if base_data['marketCap'] == 0:
             try:
-                # fast_info works even when .info fails
                 mcap = yf_ticker.fast_info['market_cap']
                 if mcap:
                     base_data['marketCap'] = mcap
             except:
                 pass
 
-        # --- FIX 2: Dividend Yield Checks ---
-        # NSE rarely gives yield, so we rely on YFinance .info
+        # --- DIVIDEND YIELD (Robust Fetch) ---
         try:
             info = yf_ticker.info
             
-            # Check 1: Standard Dividend Yield
+            # Attempt 1: Standard Key
             dy = info.get("dividendYield")
             
-            # Check 2: Trailing Annual Dividend Yield (Fallback)
+            # Attempt 2: Trailing Yield
             if dy is None:
                 dy = info.get("trailingAnnualDividendYield")
             
+            # Attempt 3: Manual Calculation (Last Resort)
+            # If API returns None, check if we have a dividend rate and current price
+            if dy is None:
+                div_rate = info.get("dividendRate")
+                current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+                if div_rate and current_price:
+                    dy = div_rate / current_price
+
+            # Final Assignment
             if dy is not None:
-                base_data['dividendYield'] = dy * 100 # Convert 0.015 to 1.5%
-                
-            # Backup Sector
+                base_data['dividendYield'] = dy * 100 # Convert 0.015 -> 1.5%
+            
+            # Backup Sector/PE
             if base_data['sector'] == "N/A":
                 base_data['sector'] = info.get("sector", "N/A")
-                
-            # Backup PE
             if base_data['trailingPE'] == "N/A":
                 base_data['trailingPE'] = info.get("trailingPE", "N/A")
                 
@@ -516,7 +531,8 @@ if ticker:
 
     # 5. UI DISPLAY
     st.sidebar.info(f"**Sector:** {sector}")
-    st.sidebar.metric("Market Cap", mcap_str)
+    formatted_mcap = format_market_cap(market_cap)
+    st.sidebar.metric("Market Cap", formatted_mcap)
     st.sidebar.metric("P/E Ratio", pe_str)
     st.sidebar.metric("Div Yield", f"{div_yield:.2f}%")
 else:
