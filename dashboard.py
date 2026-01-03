@@ -268,10 +268,6 @@ def format_market_cap(value):
 
 # --- MAIN FUNDAMENTALS FUNCTION ---
 @st.cache_data(ttl=86400)
-import yfinance as yf
-import streamlit as st
-
-@st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
         # 1. SETUP
