@@ -327,9 +327,14 @@ def get_nse_fundamentals(ticker):
                 if div_rate and current_price:
                     dy = div_rate / current_price
 
-            # Final Assignment
+            # Final Assignment with Sanity Check
             if dy is not None:
-                base_data['dividendYield'] = dy * 100 # Convert 0.015 -> 1.5%
+                # FIX: Check if it's a decimal (0.0274) or percentage (2.74)
+                # If less than 1 (100%), assume it's a decimal and multiply by 100
+                if dy < 1:
+                    base_data['dividendYield'] = dy * 100 
+                else:
+                    base_data['dividendYield'] = dy
             
             # Backup Sector/PE
             if base_data['sector'] == "N/A":
