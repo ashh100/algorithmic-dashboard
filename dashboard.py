@@ -40,25 +40,23 @@ def go_back():
 
 @st.cache_data
 def get_all_stock_symbols():
-    try:
-        from nselib import capital_market
-        # 1. Get Official List
-        nse_df = capital_market.equity_list()
-        all_symbols = nse_df['SYMBOL'].tolist()
-    except:
-        all_symbols = []
-
-    # 2. MANUALLY ADD Missing/New Stocks (The Fix for Zomato)
-    # Add any other missing tickers here
-    missing_stocks = ["ZOMATO", "PAYTM", "JIOFIN", "SWIGGY", "LICI"] 
+    # Instead of downloading from NSE (which blocks Cloud IPs), 
+    # we use a static list of popular stocks to ensure stability.
     
-    for stock in missing_stocks:
-        if stock not in all_symbols:
-            all_symbols.append(stock)
-            
-    # 3. Sort list for easy searching
-    return sorted(all_symbols)
-
+    # 1. POPULAR STOCKS (Add any new ones here)
+    popular_stocks = [
+        "ZOMATO", "SWIGGY", "PAYTM", "JIOFIN", "LICI", 
+        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+        "BHARTIARTL", "SBIN", "ITC", "KOTAKBANK", "LT",
+        "HINDUNILVR", "AXISBANK", "BAJFINANCE", "MARUTI", "ASIANPAINT",
+        "TITAN", "SUNPHARMA", "ULTRACEMCO", "TATASTEEL", "NTPC",
+        "M&M", "POWERGRID", "TATAMOTORS", "ADANIENT", "ADANIPORTS",
+        "COALINDIA", "ONGC", "GRASIM", "HCLTECH", "WIPRO",
+        "DMART", "VBL", "HAL", "DLF", "SIEMENS", "BEL"
+    ]
+    
+    # 2. Return sorted unique list
+    return sorted(list(set(popular_stocks)))
 # --- HOW TO USE IN SIDEBAR ---
 # stock_list = get_all_stock_symbols()
 # selected_ticker = st.sidebar.selectbox("Select Stock", stock_list)
@@ -552,24 +550,30 @@ def get_stock_data(ticker, period):
     return df, fundamentals
 
 # --- SIDEBAR & CONTROLS ---
+# --- SIDEBAR & CONTROLS ---
 st.sidebar.header("Controls")
 
-search_key = f"sidebar_search_{st.session_state.search_key_trigger}"
-search_query = st.sidebar.text_input("Search Company", key=search_key)
+# 1. Load the reliable static list
+stock_list = get_all_stock_symbols()
 
-if search_query:
-    results = search_tickers(search_query)
-    if results:
-        selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
-        ticker = results[selected_label]
-        st.session_state["ticker"] = ticker
-    else:
-        st.sidebar.error("No stocks found.")
-        ticker = None
+# 2. Dropdown Selection
+# This replaces the text search with a robust dropdown
+selected_ticker = st.sidebar.selectbox(
+    "Select Stock",
+    options=stock_list,
+    index=stock_list.index("ZOMATO") if "ZOMATO" in stock_list else 0
+)
+
+# 3. Handle ticker logic
+# If user picks "ZOMATO" (NSE) vs "500325" (BSE), we format it for Yahoo
+if selected_ticker.isdigit():
+    ticker = f"{selected_ticker}.BO"
+elif not selected_ticker.endswith(".NS") and not selected_ticker.endswith(".BO"):
+    ticker = f"{selected_ticker}.NS"
 else:
-    if "ticker" not in st.session_state:
-        st.session_state["ticker"] = "RELIANCE.NS"
-    ticker = st.session_state["ticker"]
+    ticker = selected_ticker
+
+st.session_state["ticker"] = ticker
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
