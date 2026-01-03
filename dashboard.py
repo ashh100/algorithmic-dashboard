@@ -35,6 +35,31 @@ def run_ai_analysis():
 def go_back():
     st.session_state.show_ai = False
 
+@st.cache_data
+def get_all_stock_symbols():
+    try:
+        from nselib import capital_market
+        # 1. Get Official List
+        nse_df = capital_market.equity_list()
+        all_symbols = nse_df['SYMBOL'].tolist()
+    except:
+        all_symbols = []
+
+    # 2. MANUALLY ADD Missing/New Stocks (The Fix for Zomato)
+    # Add any other missing tickers here
+    missing_stocks = ["ZOMATO", "PAYTM", "JIOFIN", "SWIGGY", "LICI"] 
+    
+    for stock in missing_stocks:
+        if stock not in all_symbols:
+            all_symbols.append(stock)
+            
+    # 3. Sort list for easy searching
+    return sorted(all_symbols)
+
+# --- HOW TO USE IN SIDEBAR ---
+# stock_list = get_all_stock_symbols()
+# selected_ticker = st.sidebar.selectbox("Select Stock", stock_list)
+
 # --- UTILITY FUNCTIONS ---
 def search_tickers(query):
     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=10&newsCount=0"
@@ -270,95 +295,94 @@ def format_market_cap(value):
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
-        # 1. SETUP
-        # Handle BSE tickers (digits only) or existing suffixes
+        # 1. SUFFIX FIX (Critical for Yahoo Finance)
+        # If it's a number (BSE), add .BO (e.g., 500123 -> 500123.BO)
+        # If it's text (NSE) and lacks suffix, add .NS (e.g., ZOMATO -> ZOMATO.NS)
+        ticker = ticker.strip() # Remove spaces
+        
         if ticker.isdigit():
-            ticker = f"{ticker}.BO"
-        
-        symbol = ticker.replace(".NS", "").replace(".BO", "")
-        
-        # Initialize with safe defaults so it never returns empty
+            yf_ticker_name = f"{ticker}.BO"
+            symbol = ticker # For display
+        elif not ticker.endswith(".NS") and not ticker.endswith(".BO"):
+            yf_ticker_name = f"{ticker}.NS"
+            symbol = ticker
+        else:
+            yf_ticker_name = ticker
+            symbol = ticker.replace(".NS", "").replace(".BO", "")
+
         base_data = {
             "sector": "N/A",
             "marketCap": 0,
             "trailingPE": "N/A",
-            "dividendYield": 0.0
+            "dividendYield": 0.0,
+            "currentPrice": 0.0
         }
 
-        # 2. PRIMARY: FETCH FROM NSE (Optional / Fragile)
-        try:
-            from nselib import capital_market
-            # We use a broad try here because nselib is often unstable
-            # If this block fails, we just move to YFinance
-            nse_data = capital_market.equity_list()
-            row = nse_data[nse_data['SYMBOL'] == symbol]
-            if not row.empty:
-                # NSE does not easily provide live PE/Yield in this list
-                # So we mostly rely on YF, but we can verify the symbol exists here
-                pass
-        except Exception:
-            pass 
-
-        # 3. BACKUP: FETCH FROM YFINANCE (The Reliable Source)
-        yf_ticker = yf.Ticker(ticker)
+        # 2. FETCH FROM YFINANCE (Primary Source now)
+        yf_obj = yf.Ticker(yf_ticker_name)
         
-        # --- MARKET CAP FIX ---
-        # Try multiple ways to get Market Cap (Fast Info is best)
-        mcap = None
+        # --- MARKET CAP (Try Fast Info first) ---
         try:
-            # Method A: Dot notation (Newer YF versions)
-            mcap = yf_ticker.fast_info.market_cap
+            mcap = yf_obj.fast_info.market_cap
+            if mcap:
+                base_data['marketCap'] = mcap
         except:
-            try:
-                # Method B: Dictionary key (Older YF versions)
-                mcap = yf_ticker.fast_info['market_cap']
-            except:
-                pass
-        
-        # Fallback to slower .info if fast_info failed
-        if mcap is None:
-            mcap = yf_ticker.info.get('marketCap')
-            
-        if mcap:
-            base_data['marketCap'] = mcap
+            pass
 
-        # --- FUNDAMENTALS (PE, Yield, Sector) ---
+        # --- FUNDAMENTALS ---
         try:
-            info = yf_ticker.info
+            info = yf_obj.info
+            
+            # PRICE (For manual calc fallback)
+            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+            base_data['currentPrice'] = price
             
             # SECTOR
             base_data['sector'] = info.get("sector", "N/A")
 
-            # P/E RATIO
-            # Priority: Trailing -> Forward -> N/A
+            # P/E RATIO (Robust Check)
+            # 1. Try Trailing, 2. Try Forward, 3. Manual Calc (Price/EPS) if desperate
             pe = info.get("trailingPE")
             if pe is None:
                 pe = info.get("forwardPE")
             
             if pe is not None:
                 base_data['trailingPE'] = pe
-
-            # DIVIDEND YIELD FIX
-            # 1. Get the value
+            
+            # DIVIDEND YIELD (Robust Check)
             dy = info.get("dividendYield")
             if dy is None:
                 dy = info.get("trailingAnnualDividendYield")
             
-            # 2. Return RAW DECIMAL (e.g. 0.0035 for 0.35%)
-            # Your dashboard formatting (likely .2%) handles the *100 part
+            # Return RAW DECIMAL (0.0035) -> Dashboard handles %
             if dy is not None:
                 base_data['dividendYield'] = dy
-                
+
         except Exception as e:
-            print(f"YF Info Failed: {e}")
+            print(f"YF Data Error: {e}")
+
+        # 3. NSE FALLBACK (Only for Sector if YF failed)
+        # We only use nselib as a backup for static info like 'Sector' if YF failed
+        if base_data['sector'] == "N/A" and not ticker.isdigit():
+            try:
+                from nselib import capital_market
+                data = capital_market.equity_list()
+                row = data[data['SYMBOL'] == symbol]
+                if not row.empty:
+                    # NSE CSV header is often " SECTOR " or "Industry"
+                    # We check columns loosely
+                    for col in row.columns:
+                        if "SECTOR" in col.upper() or "INDUSTRY" in col.upper():
+                            base_data['sector'] = row.iloc[0][col]
+                            break
+            except:
+                pass
 
         return base_data
 
     except Exception as e:
-        print(f"Critical Error fetching {ticker}: {e}")
-        # Return empty structure on crash so app doesn't break
         return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0.0}
-# --- NEWS ---
+    
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     try:
