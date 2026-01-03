@@ -8,6 +8,8 @@ import requests
 import xml.etree.ElementTree as ET
 from nsepython import nse_eq
 from nselib import capital_market
+st.cache_data.clear()
+
 
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
