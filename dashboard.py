@@ -8,6 +8,7 @@ import requests
 import xml.etree.ElementTree as ET
 from nsepython import nse_eq
 from nselib import capital_market
+from bs4 import BeautifulSoup
 st.cache_data.clear()
 
 
@@ -293,18 +294,63 @@ def format_market_cap(value):
     else:
         return f"₹{crores:.0f} Cr"
 
-# --- MAIN FUNDAMENTALS FUNCTION ---
+# --- 1. NEW HELPER FUNCTION (Paste this above your main function) ---
+def fetch_from_screener(symbol):
+    """
+    Fallback: Scrapes Screener.in if Yahoo fails (Good for Zomato/Swiggy)
+    """
+    try:
+        # Screener uses pure symbols (ZOMATO, not ZOMATO.NS)
+        clean_symbol = symbol.replace(".NS", "").replace(".BO", "")
+        url = f"https://www.screener.in/company/{clean_symbol}/"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        
+        response = requests.get(url, headers=headers, timeout=3)
+        if response.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        ratios = soup.find('ul', {'id': 'top-ratios'})
+        
+        if not ratios:
+            return None
+
+        data = {}
+        for li in ratios.find_all('li'):
+            name = li.find('span', {'class': 'name'}).text.strip()
+            val_span = li.find('span', {'class': 'number'})
+            if val_span:
+                # Remove commas (1,234 -> 1234)
+                val_text = val_span.text.replace(',', '').strip()
+                try:
+                    val = float(val_text)
+                    if "Market Cap" in name:
+                        # Screener is in Cr, Dashboard likely expects raw or handles Cr
+                        # Let's return raw for safety (Cr * 10^7)
+                        data['marketCap'] = val * 10000000 
+                    elif "Stock P/E" in name:
+                        data['trailingPE'] = val
+                    elif "Dividend Yield" in name:
+                        data['dividendYield'] = val / 100 # Convert 0.35 to 0.0035
+                    elif "Current Price" in name:
+                        data['currentPrice'] = val
+                except:
+                    pass
+        return data
+    except:
+        return None
+
+# --- 2. YOUR MAIN FUNCTION (With the Backup added at the end) ---
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
-        # 1. SUFFIX FIX (Critical for Yahoo Finance)
-        # If it's a number (BSE), add .BO (e.g., 500123 -> 500123.BO)
-        # If it's text (NSE) and lacks suffix, add .NS (e.g., ZOMATO -> ZOMATO.NS)
-        ticker = ticker.strip() # Remove spaces
+        # --- YOUR EXISTING CODE STARTS HERE ---
+        # 1. SUFFIX FIX 
+        ticker = ticker.strip()
         
         if ticker.isdigit():
             yf_ticker_name = f"{ticker}.BO"
-            symbol = ticker # For display
+            symbol = ticker 
         elif not ticker.endswith(".NS") and not ticker.endswith(".BO"):
             yf_ticker_name = f"{ticker}.NS"
             symbol = ticker
@@ -320,10 +366,10 @@ def get_nse_fundamentals(ticker):
             "currentPrice": 0.0
         }
 
-        # 2. FETCH FROM YFINANCE (Primary Source now)
+        # 2. FETCH FROM YFINANCE
         yf_obj = yf.Ticker(yf_ticker_name)
         
-        # --- MARKET CAP (Try Fast Info first) ---
+        # Market Cap
         try:
             mcap = yf_obj.fast_info.market_cap
             if mcap:
@@ -331,60 +377,62 @@ def get_nse_fundamentals(ticker):
         except:
             pass
 
-        # --- FUNDAMENTALS ---
+        # Fundamentals
         try:
             info = yf_obj.info
-            
-            # PRICE (For manual calc fallback)
             price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
             base_data['currentPrice'] = price
-            
-            # SECTOR
             base_data['sector'] = info.get("sector", "N/A")
 
-            # P/E RATIO (Robust Check)
-            # 1. Try Trailing, 2. Try Forward, 3. Manual Calc (Price/EPS) if desperate
             pe = info.get("trailingPE")
             if pe is None:
                 pe = info.get("forwardPE")
-            
             if pe is not None:
                 base_data['trailingPE'] = pe
             
-            # DIVIDEND YIELD (Robust Check)
             dy = info.get("dividendYield")
             if dy is None:
                 dy = info.get("trailingAnnualDividendYield")
-            
-            # Return RAW DECIMAL (0.0035) -> Dashboard handles %
             if dy is not None:
                 base_data['dividendYield'] = dy
 
         except Exception as e:
             print(f"YF Data Error: {e}")
 
-        # 3. NSE FALLBACK (Only for Sector if YF failed)
-        # We only use nselib as a backup for static info like 'Sector' if YF failed
+        # NSE Fallback (Your existing sector backup)
         if base_data['sector'] == "N/A" and not ticker.isdigit():
             try:
                 from nselib import capital_market
                 data = capital_market.equity_list()
                 row = data[data['SYMBOL'] == symbol]
                 if not row.empty:
-                    # NSE CSV header is often " SECTOR " or "Industry"
-                    # We check columns loosely
                     for col in row.columns:
                         if "SECTOR" in col.upper() or "INDUSTRY" in col.upper():
                             base_data['sector'] = row.iloc[0][col]
                             break
             except:
                 pass
+        # --- YOUR EXISTING CODE ENDS HERE ---
+
+        # --- 3. THE NEW "SCREENER" BACKUP BLOCK ---
+        # Only runs if Yahoo failed to get PE or Market Cap (Common for Swiggy/Zomato)
+        if base_data['trailingPE'] == "N/A" or base_data['marketCap'] == 0:
+            screener_data = fetch_from_screener(symbol)
+            if screener_data:
+                # Update only if we found new data
+                if screener_data.get('marketCap'): 
+                    base_data['marketCap'] = screener_data['marketCap']
+                if screener_data.get('trailingPE'): 
+                    base_data['trailingPE'] = screener_data['trailingPE']
+                if screener_data.get('dividendYield'): 
+                    base_data['dividendYield'] = screener_data['dividendYield']
+                if screener_data.get('currentPrice') and base_data['currentPrice'] == 0: 
+                    base_data['currentPrice'] = screener_data['currentPrice']
 
         return base_data
 
     except Exception as e:
         return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0.0}
-    
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
     try:
