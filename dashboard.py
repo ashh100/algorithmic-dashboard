@@ -9,6 +9,9 @@ import xml.etree.ElementTree as ET
 from nsepython import nse_eq
 from nselib import capital_market
 from bs4 import BeautifulSoup
+import database as db
+# Initialize DB (Runs once)
+db.init_db()
 st.cache_data.clear()
 
 
@@ -626,6 +629,39 @@ if ticker:
 else:
     st.sidebar.warning("Select a company to see fundamentals.")
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("📂 My Portfolio")
+
+# 1. Form to Add Stock
+with st.sidebar.expander("Add Stock to Portfolio"):
+    # Auto-fill with the currently selected ticker
+    p_ticker = st.text_input("Ticker", value=st.session_state.get("ticker", ""))
+    p_qty = st.number_input("Quantity", min_value=1, value=10)
+    p_price = st.number_input("Avg Buy Price", min_value=0.0, value=0.0)
+
+    if st.sidebar.button("Add to Portfolio"):
+        db.add_stock(p_ticker, p_qty, p_price)
+        st.sidebar.success(f"Added {p_ticker}!")
+        st.rerun() # Refresh app to show new data
+
+# 2. Display Portfolio
+portfolio_df = db.get_portfolio()
+
+if not portfolio_df.empty:
+    st.sidebar.write("### Your Holdings")
+
+    # Calculate Current Value (Optional: Connects to your live data)
+    # For now, just showing the DB table
+    st.sidebar.dataframe(portfolio_df[['ticker', 'quantity']], hide_index=True)
+
+    # Delete Button Logic
+    stock_to_delete = st.sidebar.selectbox("Remove Stock", options=portfolio_df['ticker'])
+    if st.sidebar.button("Delete Stock"):
+        db.delete_stock(stock_to_delete)
+        st.sidebar.warning(f"Removed {stock_to_delete}")
+        st.rerun()
+else:
+    st.sidebar.info("Portfolio is empty.")
 st.sidebar.markdown("---")
 st.sidebar.subheader("Chart Display")
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
