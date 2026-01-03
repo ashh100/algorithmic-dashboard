@@ -249,8 +249,7 @@ from nsepython import nse_eq
 
 @st.cache_data(ttl=86400)
 @st.cache_data(ttl=86400)
-import yfinance as yf
-from nsepython import nse_eq
+
 
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
