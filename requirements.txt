@@ -5,4 +5,5 @@ pandas
 requests
 google-generativeai
 nsepython
+nselib
 scipy
