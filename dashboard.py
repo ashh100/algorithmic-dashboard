@@ -419,18 +419,29 @@ def get_nse_fundamentals(ticker):
 
         # --- 3. THE NEW "SCREENER" BACKUP BLOCK ---
         # Only runs if Yahoo failed to get PE or Market Cap (Common for Swiggy/Zomato)
-        if base_data['trailingPE'] == "N/A" or base_data['marketCap'] == 0:
+        # --- 3. THE NEW "SCREENER" BACKUP BLOCK ---
+        # Runs if Yahoo failed to get PE, Market Cap, OR Dividend Yield
+        if (base_data['trailingPE'] == "N/A" or 
+            base_data['marketCap'] == 0 or 
+            base_data['dividendYield'] == 0.0):
+            
             screener_data = fetch_from_screener(symbol)
+            
             if screener_data:
-                # Update only if we found new data
-                if screener_data.get('marketCap'): 
+                # Update Market Cap only if Yahoo missed it
+                if screener_data.get('marketCap') and base_data['marketCap'] == 0: 
                     base_data['marketCap'] = screener_data['marketCap']
-                if screener_data.get('trailingPE'): 
+                
+                # Update PE only if Yahoo missed it
+                if screener_data.get('trailingPE') and base_data['trailingPE'] == "N/A": 
                     base_data['trailingPE'] = screener_data['trailingPE']
-                if screener_data.get('dividendYield'): 
+                
+                # Update Dividend only if Yahoo missed it (Crucial for your glitch!)
+                if screener_data.get('dividendYield') and base_data['dividendYield'] == 0.0: 
                     # Divide by 100 to match Yahoo's decimal format (e.g. 1.5 -> 0.015)
                     base_data['dividendYield'] = screener_data['dividendYield'] / 100
                 
+                # Update Price only if Yahoo missed it
                 if screener_data.get('currentPrice') and base_data['currentPrice'] == 0: 
                     base_data['currentPrice'] = screener_data['currentPrice']
 
