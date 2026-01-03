@@ -249,12 +249,14 @@ from nsepython import nse_eq
 
 @st.cache_data(ttl=86400)
 @st.cache_data(ttl=86400)
+import yfinance as yf
+from nsepython import nse_eq
+
+@st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
-        # 1. CLEANUP SYMBOL
+        # 1. SETUP
         symbol = ticker.replace(".NS", "").replace(".BO", "")
-        
-        # 2. DEFAULT DICT
         base_data = {
             "sector": "N/A",
             "marketCap": 0,
@@ -262,52 +264,72 @@ def get_nse_fundamentals(ticker):
             "dividendYield": 0.0
         }
 
-        # 3. PRIMARY: FETCH FROM NSE
+        # 2. PRIMARY: FETCH FROM NSE
+        # We wrap this in a broad try/except because NSE scraping is fragile
         try:
             nse_json = nse_eq(symbol)
             meta = nse_json.get("metadata", {})
-            trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
             
-            if 'industry' in meta: 
+            # Sector
+            if 'industry' in meta:
                 base_data['sector'] = meta['industry']
-            if 'pdSymbolPe' in meta: 
+            
+            # P/E Ratio
+            if 'pdSymbolPe' in meta:
                 base_data['trailingPE'] = meta['pdSymbolPe']
-            if 'totalMarketCap' in trade_info: 
-                # NSE gives market cap in Lakhs
-                base_data['marketCap'] = trade_info['totalMarketCap'] * 100000 
+
+            # Market Cap (NSE gives it in Lakhs, e.g. 150000 -> 15,000 Cr)
+            trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
+            if 'totalMarketCap' in trade_info:
+                base_data['marketCap'] = trade_info['totalMarketCap'] * 100000
+                
         except Exception:
-            pass # Silent fail, we will rely on YF
+            pass # If NSE fails, we rely on backups below
 
-        # 4. BACKUP: FETCH FROM YFINANCE (Crucial for BSE/.BO stocks)
+        # 3. BACKUP: FETCH FROM YFINANCE
+        # We create the object once
+        yf_ticker = yf.Ticker(ticker)
+        
+        # --- FIX 1: Market Cap using fast_info (Much more reliable) ---
+        if base_data['marketCap'] == 0:
+            try:
+                # fast_info works even when .info fails
+                mcap = yf_ticker.fast_info['market_cap']
+                if mcap:
+                    base_data['marketCap'] = mcap
+            except:
+                pass
+
+        # --- FIX 2: Dividend Yield Checks ---
+        # NSE rarely gives yield, so we rely on YFinance .info
         try:
-            yf_ticker = yf.Ticker(ticker)
-            yf_info = yf_ticker.info
+            info = yf_ticker.info
             
-            # --- FIX 1: Add Backup for Market Cap ---
-            # If NSE failed (value is 0), ask YFinance
-            if base_data['marketCap'] == 0:
-                base_data['marketCap'] = yf_info.get("marketCap", 0)
-
-            # --- FIX 2: Add Backup for Sector ---
-            if base_data['sector'] == "N/A":
-                base_data['sector'] = yf_info.get("sector", "N/A")
-
-            # --- FIX 3: Safe Dividend Yield ---
-            dy = yf_info.get("dividendYield")
+            # Check 1: Standard Dividend Yield
+            dy = info.get("dividendYield")
+            
+            # Check 2: Trailing Annual Dividend Yield (Fallback)
+            if dy is None:
+                dy = info.get("trailingAnnualDividendYield")
+            
             if dy is not None:
-                base_data['dividendYield'] = dy * 100  # Convert 0.015 -> 1.5%
-            
-            # --- FIX 4: Backup PE Ratio ---
+                base_data['dividendYield'] = dy * 100 # Convert 0.015 to 1.5%
+                
+            # Backup Sector
+            if base_data['sector'] == "N/A":
+                base_data['sector'] = info.get("sector", "N/A")
+                
+            # Backup PE
             if base_data['trailingPE'] == "N/A":
-                base_data['trailingPE'] = yf_info.get("trailingPE", "N/A")
+                base_data['trailingPE'] = info.get("trailingPE", "N/A")
                 
         except Exception as e:
-            print(f"YF Fetch Failed: {e}")
+            print(f"YF Info Failed: {e}")
 
         return base_data
 
     except Exception:
-        return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0}
+        return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0.0}
 # --- NEWS ---
 @st.cache_data(ttl=3600)
 def get_stock_news(ticker):
