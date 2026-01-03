@@ -248,6 +248,7 @@ import yfinance as yf
 from nsepython import nse_eq
 
 @st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
         # 1. CLEANUP SYMBOL
@@ -261,35 +262,42 @@ def get_nse_fundamentals(ticker):
             "dividendYield": 0.0
         }
 
-        # 3. PRIMARY: FETCH FROM NSE (Best for PE & Market Cap)
+        # 3. PRIMARY: FETCH FROM NSE
         try:
             nse_json = nse_eq(symbol)
             meta = nse_json.get("metadata", {})
             trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
             
-            # Extract NSE Data
             if 'industry' in meta: 
                 base_data['sector'] = meta['industry']
             if 'pdSymbolPe' in meta: 
                 base_data['trailingPE'] = meta['pdSymbolPe']
             if 'totalMarketCap' in trade_info: 
-                # NSE gives market cap in Lakhs, converting to actual value
+                # NSE gives market cap in Lakhs
                 base_data['marketCap'] = trade_info['totalMarketCap'] * 100000 
-        except Exception as e:
-            print(f"NSE Fetch Failed: {e}")
+        except Exception:
+            pass # Silent fail, we will rely on YF
 
-        # 4. BACKUP/SUPPLEMENT: FETCH FROM YFINANCE (Best for Dividend Yield)
+        # 4. BACKUP: FETCH FROM YFINANCE (Crucial for BSE/.BO stocks)
         try:
-            # We use yfinance to get the Dividend Yield because NSE often hides it
             yf_ticker = yf.Ticker(ticker)
             yf_info = yf_ticker.info
             
-            # Get Dividend Yield
+            # --- FIX 1: Add Backup for Market Cap ---
+            # If NSE failed (value is 0), ask YFinance
+            if base_data['marketCap'] == 0:
+                base_data['marketCap'] = yf_info.get("marketCap", 0)
+
+            # --- FIX 2: Add Backup for Sector ---
+            if base_data['sector'] == "N/A":
+                base_data['sector'] = yf_info.get("sector", "N/A")
+
+            # --- FIX 3: Safe Dividend Yield ---
             dy = yf_info.get("dividendYield")
             if dy is not None:
                 base_data['dividendYield'] = dy * 100  # Convert 0.015 -> 1.5%
             
-            # Failsafe: If NSE PE failed, try YFinance PE
+            # --- FIX 4: Backup PE Ratio ---
             if base_data['trailingPE'] == "N/A":
                 base_data['trailingPE'] = yf_info.get("trailingPE", "N/A")
                 
@@ -298,7 +306,7 @@ def get_nse_fundamentals(ticker):
 
         return base_data
 
-    except Exception as e:
+    except Exception:
         return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0}
 # --- NEWS ---
 @st.cache_data(ttl=3600)
