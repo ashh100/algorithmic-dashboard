@@ -59,3 +59,15 @@ def delete_stock(ticker):
     c.execute('DELETE FROM portfolio WHERE ticker = ?', (ticker,))
     conn.commit()
     conn.close()
+
+def update_stock(ticker, new_quantity, new_avg_price):
+    """Updates the quantity and price of an existing stock."""
+    conn = sqlite3.connect('portfolio.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute('''
+        UPDATE portfolio 
+        SET quantity = ?, avg_price = ? 
+        WHERE ticker = ?
+    ''', (new_quantity, new_avg_price, ticker))
+    conn.commit()
+    conn.close()
