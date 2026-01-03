@@ -428,7 +428,9 @@ def get_nse_fundamentals(ticker):
                 if screener_data.get('trailingPE'): 
                     base_data['trailingPE'] = screener_data['trailingPE']
                 if screener_data.get('dividendYield'): 
-                    base_data['dividendYield'] = screener_data['dividendYield']
+                    # Divide by 100 to match Yahoo's decimal format (e.g. 1.5 -> 0.015)
+                    base_data['dividendYield'] = screener_data['dividendYield'] / 100
+                
                 if screener_data.get('currentPrice') and base_data['currentPrice'] == 0: 
                     base_data['currentPrice'] = screener_data['currentPrice']
 
