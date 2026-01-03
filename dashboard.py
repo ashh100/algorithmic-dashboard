@@ -268,6 +268,10 @@ def format_market_cap(value):
 
 # --- MAIN FUNDAMENTALS FUNCTION ---
 @st.cache_data(ttl=86400)
+import yfinance as yf
+import streamlit as st
+
+@st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     try:
         # 1. SETUP
@@ -279,76 +283,66 @@ def get_nse_fundamentals(ticker):
             "dividendYield": 0.0
         }
 
-        # 2. PRIMARY: FETCH FROM NSE
-        # We wrap this in a broad try/except because NSE scraping is fragile
+        # 2. PRIMARY: FETCH FROM NSE (Wrapped to prevent crashes)
         try:
-            nse_json = nse_eq(symbol)
+            # Assuming nse_eq is your custom wrapper. 
+            # If this fails or lib is missing, we jump strictly to backup.
+            nse_json = nse_eq(symbol) 
             meta = nse_json.get("metadata", {})
             trade_info = nse_json.get("marketDeptOrderBook", {}).get("tradeInfo", {})
             
-            # Sector
             if 'industry' in meta:
                 base_data['sector'] = meta['industry']
-            
-            # P/E Ratio
             if 'pdSymbolPe' in meta:
                 base_data['trailingPE'] = meta['pdSymbolPe']
-
-            # Market Cap (NSE gives it in Lakhs, e.g. 150000 -> 15,000 Cr)
             if 'totalMarketCap' in trade_info:
                 base_data['marketCap'] = trade_info['totalMarketCap'] * 100000
-                
         except Exception:
-            pass # If NSE fails, we rely on backups below
+            pass 
 
-        # 3. BACKUP: FETCH FROM YFINANCE
-        # We create the object once
+        # 3. BACKUP: FETCH FROM YFINANCE (The Fixes)
         yf_ticker = yf.Ticker(ticker)
         
-        # --- MARKET CAP (Backup) ---
-        # This uses fast_info which is very reliable for Market Cap
+        # --- MARKET CAP ---
         if base_data['marketCap'] == 0:
             try:
-                mcap = yf_ticker.fast_info['market_cap']
+                mcap = yf_ticker.fast_info.get('market_cap')
                 if mcap:
                     base_data['marketCap'] = mcap
             except:
                 pass
 
-        # --- DIVIDEND YIELD (Robust Fetch with Sanity Check) ---
+        # --- FUNDAMENTALS ---
         try:
             info = yf_ticker.info
             
-            # Attempt 1: Standard Key
-            dy = info.get("dividendYield")
+            # Sector
+            if base_data['sector'] == "N/A":
+                base_data['sector'] = info.get("sector", "N/A")
+
+            # P/E Ratio (Fix for Zomato/Swiggy)
+            # If Trailing is missing/Zero, use Forward
+            t_pe = info.get("trailingPE")
+            f_pe = info.get("forwardPE")
+
+            # Update only if NSE didn't find it or found "N/A"
+            if base_data['trailingPE'] == "N/A" or base_data['trailingPE'] == 0:
+                if t_pe is not None:
+                    base_data['trailingPE'] = t_pe
+                elif f_pe is not None:
+                    base_data['trailingPE'] = f_pe
+
+            # --- DIVIDEND YIELD FIX ---
+            # Your dashboard multiplies by 100. We must return RAW decimal.
+            # Reliance: 0.0035 -> Dashboard makes it 0.35%
+            # Infosys: 0.0274 -> Dashboard makes it 2.74%
             
-            # Attempt 2: Trailing Yield
+            dy = info.get("dividendYield")
             if dy is None:
                 dy = info.get("trailingAnnualDividendYield")
             
-            # Attempt 3: Manual Calculation (Last Resort)
-            if dy is None:
-                div_rate = info.get("dividendRate")
-                current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-                if div_rate and current_price:
-                    dy = div_rate / current_price
-
-            # --- THE FIX IS HERE ---
             if dy is not None:
-                # Sanity Check: If dy < 1 (e.g., 0.027), it's a decimal -> Multiply by 100
-                # If dy > 1 (e.g., 2.7), it's likely already a percentage -> Keep as is
-                if dy < 1:
-                    base_data['dividendYield'] = dy * 100 
-                else:
-                    base_data['dividendYield'] = dy
-            
-            # Backup Sector
-            if base_data['sector'] == "N/A":
-                base_data['sector'] = info.get("sector", "N/A")
-                
-            # Backup PE
-            if base_data['trailingPE'] == "N/A":
-                base_data['trailingPE'] = info.get("trailingPE", "N/A")
+                base_data['dividendYield'] = dy  # REMOVED the "* 100" here
                 
         except Exception as e:
             print(f"YF Info Failed: {e}")
@@ -356,7 +350,6 @@ def get_nse_fundamentals(ticker):
         return base_data
 
     except Exception:
-        # Final safety net
         return {"sector": "N/A", "marketCap": 0, "trailingPE": "N/A", "dividendYield": 0.0}
 # --- NEWS ---
 @st.cache_data(ttl=3600)
