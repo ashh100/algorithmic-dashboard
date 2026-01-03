@@ -7,3 +7,4 @@ google-generativeai
 nsepython
 nselib
 scipy
+pandas_market_calendars
