@@ -850,35 +850,33 @@ if ticker:
             else:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
-        with tab4:
+       with tab4:
             st.subheader("💼 Portfolio Tracker")
             
-            # --- SECTION 1: INPUT FORM ---
-            with st.expander("Add New Position", expanded=False):
+            # --- FETCH DATA EARLY (Needed for both Manage & Display sections) ---
+            pf_df = db.get_portfolio()
+            
+            # --- SECTION 1: ADD NEW POSITION (Exact Old Layout) ---
+            with st.expander("➕ Add New Position", expanded=False):
                 st.caption("Step 1: Search & Select Stock")
                 
                 row1_1, row1_2 = st.columns(2)
-                
                 with row1_1:
-                    pf_search = st.text_input("Search Ticker", placeholder="e.g. TCS, HDFC, Tata", key="pf_search_box")
+                    pf_search = st.text_input("Search Ticker", placeholder="e.g. TCS", key="pf_add_search")
                 
                 chosen_ticker = None
-                
                 with row1_2:
                     if pf_search:
-                        # Uses your existing search function
                         results = search_tickers(pf_search) 
                         if results:
-                            selected_label = st.selectbox("Select Stock", options=results.keys(), key="pf_select_box")
+                            selected_label = st.selectbox("Select Stock", options=results.keys(), key="pf_add_select")
                             chosen_ticker = results[selected_label]
                         else:
-                            st.warning("No Indian stocks found.")
-                            
-                # Logic to auto-fill price (Preserved from your code)
+                            st.warning("No stocks found.")
+
+                # Auto-fill logic (Preserved)
                 if chosen_ticker:
-                    if 'last_pf_ticker' not in st.session_state:
-                        st.session_state.last_pf_ticker = None
-                    
+                    if 'last_pf_ticker' not in st.session_state: st.session_state.last_pf_ticker = None
                     if st.session_state.last_pf_ticker != chosen_ticker:
                         try:
                             stock_info = yf.Ticker(chosen_ticker)
@@ -888,16 +886,15 @@ if ticker:
                                 default_price = stock_info.history(period='1d')['Close'].iloc[-1]
                         except:
                             default_price = 0.0
-                        
                         st.session_state.pf_ticker_input = chosen_ticker
                         st.session_state.pf_price_input = float(default_price)
                         st.session_state.last_pf_ticker = chosen_ticker
 
                 st.divider()
                 st.caption("Step 2: Confirm Details")
-                
+
+                # Layout: Inputs + Button in one row (Preserved from your code)
                 c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-                
                 with c1:
                     new_ticker = st.text_input("Ticker Symbol", key="pf_ticker_input").upper()
                 with c2:
@@ -907,35 +904,56 @@ if ticker:
                 with c4:
                     st.write("") 
                     st.write("")
-                    # --- DB SAVE ACTION ---
                     if st.button("Add"):
                         if new_ticker and new_price > 0:
-                            # 1. Save to DB
                             db.add_stock(new_ticker, new_qty, new_price)
-                            # 2. Show Success
-                            st.toast(f"Added {new_ticker} to Database!", icon="✅")
-                            # 3. Refresh app to show new data
-                            st.rerun() 
+                            st.toast(f"Added {new_ticker}!", icon="✅")
+                            st.rerun()
                         else:
-                            st.error("Invalid Ticker or Price")
+                            st.error("Invalid")
 
-            # --- SECTION 2: TABLE DISPLAY ---
-            
-            # 1. Fetch from Database
-            pf_df = db.get_portfolio()
-            
+            # --- SECTION 2: MANAGE HOLDINGS (New Feature) ---
+            with st.expander("✏️ Manage Holdings (Edit / Delete)", expanded=False):
+                if not pf_df.empty:
+                    # 1. Select Stock
+                    stock_list = pf_df['ticker'].tolist()
+                    selected_stock = st.selectbox("Select Stock to Edit", stock_list, key="manage_select")
+                    
+                    # 2. Get Current Values
+                    current_row = pf_df[pf_df['ticker'] == selected_stock].iloc[0]
+                    cur_qty = int(current_row['quantity'])
+                    cur_price = float(current_row['avg_price'])
+                    
+                    # 3. Edit Form
+                    m1, m2, m3 = st.columns(3)
+                    with m1:
+                        edit_qty = st.number_input("New Quantity", min_value=1, value=cur_qty, key="edit_qty")
+                    with m2:
+                        edit_price = st.number_input("New Price", min_value=0.0, value=cur_price, format="%.2f", key="edit_price")
+                    with m3:
+                        st.write("")
+                        st.write("")
+                        if st.button("Update Position"):
+                            db.update_stock(selected_stock, edit_qty, edit_price)
+                            st.toast(f"Updated {selected_stock}!", icon="🔄")
+                            st.rerun()
+
+                    # 4. Single Delete Button
+                    if st.button(f"🗑️ Remove {selected_stock} Only", type="secondary"):
+                        db.delete_stock(selected_stock)
+                        st.rerun()
+                else:
+                    st.info("Portfolio is empty.")
+
+            # --- SECTION 3: DISPLAY TABLE ---
             if not pf_df.empty:
-                # 2. Rename DB columns to match your old UI code
-                pf_df = pf_df.rename(columns={
-                    "ticker": "Ticker",
-                    "quantity": "Quantity",
-                    "avg_price": "Buy Price"
-                })
-
+                # Rename for UI (We use a copy 'display_df' so we don't break the logic above)
+                display_df = pf_df.rename(columns={"ticker": "Ticker", "quantity": "Quantity", "avg_price": "Buy Price"})
+                
                 realtime_prices = {}
-                unique_tickers = pf_df['Ticker'].unique()
+                unique_tickers = display_df['Ticker'].unique()
 
-                # 3. Fetch Live Prices (Exact same logic as your old code)
+                # Fetch Live Prices
                 for t in unique_tickers:
                     try:
                         stock = yf.Ticker(t)
@@ -948,28 +966,28 @@ if ticker:
                             else:
                                 current_price = 0.0
                         realtime_prices[t] = float(current_price)
-                    except Exception as e:
+                    except:
                         realtime_prices[t] = 0.0
 
-                # 4. Calculate P&L (Exact same logic)
-                pf_df['Current Price'] = pf_df['Ticker'].map(realtime_prices).fillna(0.0)
-                pf_df['Invested Value'] = pf_df['Quantity'] * pf_df['Buy Price']
-                pf_df['Current Value'] = pf_df['Quantity'] * pf_df['Current Price']
-                pf_df['P/L'] = pf_df['Current Value'] - pf_df['Invested Value']
-                pf_df['P/L %'] = (pf_df['P/L'] / pf_df['Invested Value']) * 100
+                # Calculations
+                display_df['Current Price'] = display_df['Ticker'].map(realtime_prices).fillna(0.0)
+                display_df['Invested Value'] = display_df['Quantity'] * display_df['Buy Price']
+                display_df['Current Value'] = display_df['Quantity'] * display_df['Current Price']
+                display_df['P/L'] = display_df['Current Value'] - display_df['Invested Value']
+                display_df['P/L %'] = (display_df['P/L'] / display_df['Invested Value']) * 100
 
-                total_invested = pf_df['Invested Value'].sum()
-                total_current = pf_df['Current Value'].sum()
-                total_pl = pf_df['P/L'].sum()
+                total_invested = display_df['Invested Value'].sum()
+                total_current = display_df['Current Value'].sum()
+                total_pl = display_df['P/L'].sum()
                 
-                # 5. Display Metrics
+                # Metrics
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Total Invested", f"₹{total_invested:,.2f}")
                 m2.metric("Current Value", f"₹{total_current:,.2f}")
                 m3.metric("Total P/L", f"₹{total_pl:,.2f}", delta=f"{total_pl:,.2f}")
 
-                # 6. Display Styled Table
-                st.dataframe(pf_df.style.format({
+                # Table
+                st.dataframe(display_df.style.format({
                     "Buy Price": "₹{:.2f}", 
                     "Current Price": "₹{:.2f}",
                     "Invested Value": "₹{:.2f}",
@@ -979,13 +997,13 @@ if ticker:
                 }).map(lambda x: 'color: #00e676' if x > 0 else 'color: #ff1744', subset=['P/L', 'P/L %']),
                 use_container_width=True)
                 
-                # 7. Clear Button
-                if st.button("Clear Portfolio", type="primary"):
-                     # Delete all stocks from DB
+                # --- SECTION 4: CLEAR ALL BUTTON (Restored) ---
+                st.divider()
+                if st.button("Clear Entire Portfolio", type="primary"):
                      for t in unique_tickers:
                          db.delete_stock(t)
                      st.rerun()
-
+                     
             else:
                 st.info("Portfolio is empty.")
 else:
