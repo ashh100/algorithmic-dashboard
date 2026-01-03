@@ -850,7 +850,7 @@ if ticker:
             else:
                 st.warning("Could not fetch comparison data. (Nifty 50 data may be unavailable).")
         
-       with tab4:
+        with tab4:
             st.subheader("💼 Portfolio Tracker")
             
             # --- FETCH DATA EARLY (Needed for both Manage & Display sections) ---
