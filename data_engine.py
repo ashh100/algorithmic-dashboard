@@ -11,49 +11,76 @@ from nselib import capital_market
 from bs4 import BeautifulSoup
 import database as db
 # --- 1. NEW HELPER FUNCTION (Paste this above your main function) ---
-def fetch_from_screener(symbol):
+# --- HELPER: SCREENER FETCH (DEBUG VERSION) ---
+def fetch_from_screener(ticker):
     """
-    Fallback: Scrapes Screener.in if Yahoo fails (Good for Zomato/Swiggy)
+    Fetches backup data from Screener.in with DEBUG prints.
     """
     try:
-        # Screener uses pure symbols (ZOMATO, not ZOMATO.NS)
-        clean_symbol = symbol.replace(".NS", "").replace(".BO", "")
-        url = f"https://www.screener.in/company/{clean_symbol}/"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        # Clean ticker (ZOMATO.NS -> ZOMATO)
+        clean_ticker = ticker.upper().replace(".NS", "").replace(".BO", "")
+        url = f"https://www.screener.in/company/{clean_ticker}/consolidated/"
         
-        response = requests.get(url, headers=headers, timeout=3)
+        print(f"🕵️ CHECKING SCREENER: {url}") # Debug Print
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=5)
+        
         if response.status_code != 200:
-            return None
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        ratios = soup.find('ul', {'id': 'top-ratios'})
+            # Try non-consolidated if consolidated fails
+            url = f"https://www.screener.in/company/{clean_ticker}/"
+            print(f"🔄 Retrying non-consolidated: {url}")
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code != 200:
+                print("❌ Screener: 404 Not Found")
+                return None
+            
+        soup = BeautifulSoup(response.text, "html.parser")
         
-        if not ratios:
+        # Look specifically for the Top Ratios list
+        ratios_ul = soup.find("ul", {"id": "top-ratios"})
+        
+        if not ratios_ul:
+            print("❌ Screener: Could not find 'top-ratios' section on page.")
             return None
-
+            
         data = {}
-        for li in ratios.find_all('li'):
-            name = li.find('span', {'class': 'name'}).text.strip()
-            val_span = li.find('span', {'class': 'number'})
-            if val_span:
-                # Remove commas (1,234 -> 1234)
-                val_text = val_span.text.replace(',', '').strip()
+        
+        # Loop through list items
+        for li in ratios_ul.find_all("li"):
+            name_tag = li.find("span", class_="name")
+            val_tag = li.find("span", class_="number")
+            
+            if name_tag and val_tag:
+                name = name_tag.text.strip()
+                val_text = val_tag.text.strip().replace(",", "")
+                
                 try:
                     val = float(val_text)
+                    
                     if "Market Cap" in name:
-                        # Screener is in Cr, Dashboard likely expects raw or handles Cr
-                        # Let's return raw for safety (Cr * 10^7)
-                        data['marketCap'] = val * 10000000 
+                        data['marketCap'] = val * 10000000  # Convert Cr
                     elif "Stock P/E" in name:
                         data['trailingPE'] = val
                     elif "Dividend Yield" in name:
-                        data['dividendYield'] = val / 100 # Convert 0.35 to 0.0035
+                        data['dividendYield'] = val  # Keep as % (e.g. 1.5)
                     elif "Current Price" in name:
                         data['currentPrice'] = val
-                except:
-                    pass
-        return data
-    except:
+                except ValueError:
+                    continue
+
+        if data:
+            print(f"✅ Screener Success for {clean_ticker}: Found {len(data)} items")
+            return data
+        else:
+            print("⚠️ Screener: Page found, but no data extracted.")
+            return None
+        
+    except Exception as e:
+        print(f"⚠️ Screener Error: {e}")
         return None
 # --- UTILITY FUNCTIONS ---
 def search_tickers(query):
