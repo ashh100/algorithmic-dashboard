@@ -1,0 +1,11 @@
+[theme]
+# Neon green accent color for buttons and highlights
+primaryColor = "#00e676"
+# Deep dark background 
+backgroundColor = "#0b0e14"
+# Slightly lighter dark background for sidebars and input boxes
+secondaryBackgroundColor = "#151a23"
+# Crisp white text
+textColor = "#f8f9fa"
+# Monospace font makes numbers line up perfectly and looks "hacker/quant"
+font = "monospace"

@@ -28,6 +28,31 @@ def get_nse_fundamentals(ticker):
     return data_engine.get_nse_fundamentals(ticker)
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
+# --- CUSTOM CSS FOR METRIC CARDS ---
+st.markdown("""
+<style>
+/* Style the metric boxes */
+div[data-testid="metric-container"] {
+    background-color: #151a23;
+    border: 1px solid #2962ff; /* Deep blue border */
+    padding: 10px 15px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(41, 98, 255, 0.2); /* Slight blue glow */
+    transition: transform 0.2s;
+}
+
+/* Add a subtle hover effect */
+div[data-testid="metric-container"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 15px rgba(0, 230, 118, 0.4); /* Glows green on hover */
+    border: 1px solid #00e676;
+}
+
+/* Hide the Streamlit main menu hamburger and watermark for a cleaner look */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 st.title("Algorithmic Dashboard")
 
 # --- SESSION STATE SETUP ---
