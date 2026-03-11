@@ -588,7 +588,7 @@ if ticker:
                             else:
                                 st.write(n)
         
-        tab1, tab2, tab3, tab4 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison", "💼 Portfolio"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Price Action", "📊 Technical Indicators", "⚖️ Sector Comparison", "💼 Portfolio", "👀 Watchlist"])
         
         with tab1:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
@@ -756,7 +756,87 @@ if ticker:
                             st.rerun()
                         else:
                             st.error("Invalid")
+        with tab5:
+            st.subheader("👀 My Watchlist")
+            
+            # --- SECTION 1: ADD TO WATCHLIST ---
+            with st.expander("➕ Add to Watchlist", expanded=False):
+                st.caption("Search & Select Stock to Monitor")
+                
+                row_w1, row_w2 = st.columns(2)
+                with row_w1:
+                    wl_search = st.text_input("Search Ticker", placeholder="e.g. INFY", key="wl_add_search")
+                
+                chosen_wl_ticker = None
+                with row_w2:
+                    if wl_search:
+                        results = search_tickers(wl_search) 
+                        if results:
+                            selected_label = st.selectbox("Select Stock", options=results.keys(), key="wl_add_select")
+                            chosen_wl_ticker = results[selected_label]
+                        else:
+                            st.warning("No stocks found.")
+                
+                if chosen_wl_ticker:
+                    if st.button("Add to Watchlist", type="primary"):
+                        db.add_to_watchlist(chosen_wl_ticker)
+                        st.success(f"Added {chosen_wl_ticker} to Watchlist!")
+                        st.rerun()
 
+            # --- SECTION 2: DISPLAY LIVE WATCHLIST ---
+            watchlist_tickers = db.get_watchlist()
+            
+            if not watchlist_tickers:
+                st.info("Your watchlist is empty. Search and add some stocks above to start tracking them!")
+            else:
+                st.write("### Live Tracking")
+                
+                # Fetch quick live data for the grid
+                watch_data = []
+                with st.spinner("Fetching live prices..."):
+                    for t in watchlist_tickers:
+                        try:
+                            # Fetch last 2 days to calculate % change
+                            hist = yf.Ticker(t).history(period="2d")
+                            if not hist.empty:
+                                current_p = hist['Close'].iloc[-1]
+                                prev_p = hist['Close'].iloc[-2] if len(hist) > 1 else current_p
+                                pct_change = ((current_p - prev_p) / prev_p) * 100
+                                
+                                # Use formatting for clean display
+                                watch_data.append({
+                                    "Ticker": t, 
+                                    "LTP (₹)": f"{current_p:.2f}", 
+                                    "Change %": f"{pct_change:+.2f}%"
+                                })
+                        except Exception:
+                            watch_data.append({"Ticker": t, "LTP (₹)": "Error", "Change %": "Error"})
+                
+                # Render the Data Table
+                if watch_data:
+                    wl_df = pd.DataFrame(watch_data)
+                    # Pandas styling to color-code the % change (Green for positive, Red for negative)
+                    def color_change(val):
+                        if "Error" in str(val): return ''
+                        color = '#00e676' if '+' in str(val) else '#ff1744' if '-' in str(val) else 'white'
+                        return f'color: {color}'
+                    
+                    styled_df = wl_df.style.map(color_change, subset=['Change %'])
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                
+                # --- SECTION 3: REMOVE FROM WATCHLIST ---
+                st.divider()
+                st.caption("Manage List")
+                col_rem1, col_rem2 = st.columns([3, 1])
+                with col_rem1:
+                    stock_to_remove = st.selectbox("Remove a stock", options=watchlist_tickers, key="wl_remove")
+                with col_rem2:
+                    st.write("") # Spacing to align with selectbox
+                    st.write("")
+                    if st.button("Delete"):
+                        db.remove_from_watchlist(stock_to_remove)
+                        st.warning(f"Removed {stock_to_remove} from Watchlist.")
+                        st.rerun()
             # --- SECTION 2: MANAGE HOLDINGS (New Feature) ---
             with st.expander("✏️ Manage Holdings (Edit / Delete)", expanded=False):
                 if not pf_df.empty:
