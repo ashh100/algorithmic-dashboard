@@ -31,23 +31,25 @@ st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal", initial_s
 st.markdown("""
 <style>
 /* === HIDE STREAMLIT CHROME === */
-#MainMenu, footer, header { visibility: hidden; }
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
 .stDeployButton { display: none; }
 [data-testid="stDecoration"] { display: none; }
+[data-testid="stToolbar"] { display: none; }
 
-/* === SIDEBAR TOGGLE BUTTON === */
-[data-testid="collapsedControl"] {
-    background-color: #2962ff !important;
-    border-radius: 0 6px 6px 0 !important;
-    width: 22px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    padding: 12px 0 !important;
-    opacity: 1 !important;
+/* Keep header bar but make it match the dark theme */
+[data-testid="stHeader"] {
+    background-color: #0b0e14 !important;
+    border-bottom: 1px solid #1e2533 !important;
 }
-[data-testid="collapsedControl"] svg {
-    color: white !important;
-    fill: white !important;
+
+/* Style the sidebar toggle button inside the header */
+[data-testid="stHeader"] button {
+    color: #00e676 !important;
+    background: transparent !important;
+}
+[data-testid="stHeader"] button:hover {
+    background: #1e2533 !important;
 }
 
 /* === SCROLLBAR === */
