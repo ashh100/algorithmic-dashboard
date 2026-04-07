@@ -33,24 +33,15 @@ st.markdown("""
 /* === HIDE STREAMLIT CHROME === */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
-.stDeployButton { display: none; }
 [data-testid="stDecoration"] { display: none; }
-[data-testid="stToolbar"] { display: none; }
 
-/* Keep header bar but make it match the dark theme */
+/* Make header dark — do NOT hide it, the sidebar toggle lives inside it */
 [data-testid="stHeader"] {
     background-color: #0b0e14 !important;
     border-bottom: 1px solid #1e2533 !important;
 }
-
-/* Style the sidebar toggle button inside the header */
-[data-testid="stHeader"] button {
-    color: #00e676 !important;
-    background: transparent !important;
-}
-[data-testid="stHeader"] button:hover {
-    background: #1e2533 !important;
-}
+/* Hide only the deploy/share button, not the whole toolbar */
+[data-testid="stToolbarActions"] { visibility: hidden; }
 
 /* === SCROLLBAR === */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
