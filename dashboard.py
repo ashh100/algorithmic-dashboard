@@ -11,9 +11,68 @@ from nselib import capital_market
 from bs4 import BeautifulSoup
 import database as db
 import data_engine
+
+# Must be first Streamlit call
+st.set_page_config(layout="wide", page_title="Market Terminal", initial_sidebar_state="expanded")
+
 # Initialize DB (Runs once)
 db.init_db()
 st.cache_data.clear()
+
+# --- LOGIN GATE ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+
+if not st.session_state.logged_in:
+    st.markdown("""
+    <style>
+    #MainMenu{visibility:hidden;}footer{visibility:hidden;}
+    [data-testid="stHeader"]{background:#0b0e14;}
+    body{background:#0b0e14;}
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style='text-align:center;padding:60px 0 20px'>
+        <span style='font-size:13px;letter-spacing:4px;color:#6b7280;font-family:monospace'>MARKET</span>
+        <span style='font-size:13px;letter-spacing:4px;color:#00e676;font-family:monospace'> TERMINAL</span>
+        <p style='color:#6b7280;font-size:11px;letter-spacing:2px;margin-top:6px;font-family:monospace'>SECURE ACCESS</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    tab_login, tab_register = st.tabs(["Login", "Register"])
+
+    with tab_login:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login", use_container_width=True)
+            if submitted:
+                if db.verify_user(username, password):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username.strip().lower()
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+
+    with tab_register:
+        with st.form("register_form"):
+            new_user = st.text_input("Choose a Username")
+            new_pass = st.text_input("Choose a Password", type="password")
+            new_pass2 = st.text_input("Confirm Password", type="password")
+            submitted = st.form_submit_button("Create Account", use_container_width=True)
+            if submitted:
+                if new_pass != new_pass2:
+                    st.error("Passwords do not match.")
+                else:
+                    ok, msg = db.register_user(new_user, new_pass)
+                    if ok:
+                        st.success(msg + " You can now log in.")
+                    else:
+                        st.error(msg)
+
+    st.stop()  # Block everything below until logged in
 
 # --- BRIDGE FUNCTIONS ---
 
@@ -26,8 +85,6 @@ def search_tickers(query):
 @st.cache_data(ttl=86400)
 def get_nse_fundamentals(ticker):
     return data_engine.get_nse_fundamentals(ticker)
-# 1. Page Setup
-st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
 /* === HIDE STREAMLIT CHROME === */
@@ -731,6 +788,11 @@ def get_stock_data(ticker, period):
 
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.markdown('<div class="sidebar-brand">⬡ &nbsp;Terminal</div>', unsafe_allow_html=True)
+st.sidebar.markdown(f'<p style="font-size:10px;color:#6b7280;letter-spacing:1px;font-family:monospace;margin:0">USER · {st.session_state.username.upper()}</p>', unsafe_allow_html=True)
+if st.sidebar.button("Logout", use_container_width=True):
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.rerun()
 
 # Single selectbox with built-in typeahead — type "TATA" to filter TATAMOTORS, TATAPOWER, etc.
 all_symbols = get_all_stock_symbols()

@@ -1,14 +1,26 @@
 import sqlite3
 import pandas as pd
+import hashlib
 
-# Name of our database file
 DB_NAME = "portfolio.db"
+
+def _hash(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def init_db():
     """Creates the tables if they don't exist yet."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    
+
+    # Users table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL
+        )
+    ''')
+
     # 1. Existing Portfolio Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS portfolio (
@@ -18,18 +30,44 @@ def init_db():
             avg_price REAL NOT NULL
         )
     ''')
-    
-    # 2. NEW: Watchlist Table
-    # (Note: We only need the ticker. We'll fetch live data for these in the UI)
+
+    # 2. Watchlist Table
     c.execute('''
         CREATE TABLE IF NOT EXISTS watchlist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL UNIQUE
         )
     ''')
-    
+
     conn.commit()
     conn.close()
+
+# --- AUTH FUNCTIONS ---
+
+def register_user(username: str, password: str):
+    """Returns (success: bool, message: str)."""
+    if not username.strip() or not password:
+        return False, "Username and password cannot be empty."
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                  (username.strip().lower(), _hash(password)))
+        conn.commit()
+        return True, "Account created."
+    except sqlite3.IntegrityError:
+        return False, "Username already taken."
+    finally:
+        conn.close()
+
+def verify_user(username: str, password: str) -> bool:
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE username = ?",
+              (username.strip().lower(),))
+    row = c.fetchone()
+    conn.close()
+    return row is not None and row[0] == _hash(password)
 
 # --- PORTFOLIO FUNCTIONS ---
 
