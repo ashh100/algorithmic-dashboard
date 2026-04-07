@@ -251,9 +251,6 @@ if 'portfolio' not in st.session_state:
 if "ticker" not in st.session_state:
     st.session_state["ticker"] = "RELIANCE.NS"
 
-# Initialize Search Key Wrapper
-if "search_key_trigger" not in st.session_state:
-    st.session_state.search_key_trigger = 0
 
 def run_ai_analysis():
     st.session_state.show_ai = True
@@ -624,22 +621,26 @@ def get_stock_data(ticker, period):
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.markdown('<div class="sidebar-brand">⬡ &nbsp;Terminal</div>', unsafe_allow_html=True)
 
-search_key = f"sidebar_search_{st.session_state.search_key_trigger}"
-search_query = st.sidebar.text_input("Search Company", key=search_key)
+search_query = st.sidebar.text_input("Search by Name", placeholder="e.g. Reliance, Infosys...")
 
 if search_query:
+    # Yahoo search — matches company names
     results = search_tickers(search_query)
     if results:
-        selected_label = st.sidebar.selectbox("Select Stock", options=results.keys())
+        selected_label = st.sidebar.selectbox("Select", options=list(results.keys()))
         ticker = results[selected_label]
         st.session_state["ticker"] = ticker
     else:
-        st.sidebar.error("No stocks found.")
-        ticker = None
+        st.sidebar.caption("No matches. Clear to browse all stocks.")
+        ticker = st.session_state.get("ticker", "RELIANCE.NS")
 else:
-    if "ticker" not in st.session_state:
-        st.session_state["ticker"] = "RELIANCE.NS"
-    ticker = st.session_state["ticker"]
+    # Browse all NSE stocks — selectbox has built-in filter-as-you-type
+    all_symbols = get_all_stock_symbols()
+    current_symbol = st.session_state.get("ticker", "RELIANCE.NS").replace(".NS", "").replace(".BO", "")
+    default_idx = all_symbols.index(current_symbol) if current_symbol in all_symbols else 0
+    selected_symbol = st.sidebar.selectbox("Browse All Stocks", options=all_symbols, index=default_idx)
+    ticker = f"{selected_symbol}.NS"
+    st.session_state["ticker"] = ticker
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
