@@ -839,7 +839,8 @@ if ticker:
     if not df.empty:
         if not df[df['Volume'] > 0].empty:
             df = df[df['Volume'] > 0]
-        
+        df = df.dropna(subset=['Close'])
+
         current_price = df['Close'].iloc[-1]
         
         period_high = df['High'].max()
