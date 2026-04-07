@@ -629,26 +629,13 @@ def get_stock_data(ticker, period):
 # --- SIDEBAR & CONTROLS ---
 st.sidebar.markdown('<div class="sidebar-brand">⬡ &nbsp;Terminal</div>', unsafe_allow_html=True)
 
-search_query = st.sidebar.text_input("Search by Name", placeholder="e.g. Reliance, Infosys...")
-
-if search_query:
-    # Yahoo search — matches company names
-    results = search_tickers(search_query)
-    if results:
-        selected_label = st.sidebar.selectbox("Select", options=list(results.keys()))
-        ticker = results[selected_label]
-        st.session_state["ticker"] = ticker
-    else:
-        st.sidebar.caption("No matches. Clear to browse all stocks.")
-        ticker = st.session_state.get("ticker", "RELIANCE.NS")
-else:
-    # Browse all NSE stocks — selectbox has built-in filter-as-you-type
-    all_symbols = get_all_stock_symbols()
-    current_symbol = st.session_state.get("ticker", "RELIANCE.NS").replace(".NS", "").replace(".BO", "")
-    default_idx = all_symbols.index(current_symbol) if current_symbol in all_symbols else 0
-    selected_symbol = st.sidebar.selectbox("Browse All Stocks", options=all_symbols, index=default_idx)
-    ticker = f"{selected_symbol}.NS"
-    st.session_state["ticker"] = ticker
+# Single selectbox with built-in typeahead — type "TATA" to filter TATAMOTORS, TATAPOWER, etc.
+all_symbols = get_all_stock_symbols()
+current_symbol = st.session_state.get("ticker", "RELIANCE.NS").replace(".NS", "").replace(".BO", "")
+default_idx = all_symbols.index(current_symbol) if current_symbol in all_symbols else 0
+selected_symbol = st.sidebar.selectbox("Search Stock", options=all_symbols, index=default_idx)
+ticker = f"{selected_symbol}.NS"
+st.session_state["ticker"] = ticker
 
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
