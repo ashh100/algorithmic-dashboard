@@ -27,13 +27,28 @@ def search_tickers(query):
 def get_nse_fundamentals(ticker):
     return data_engine.get_nse_fundamentals(ticker)
 # 1. Page Setup
-st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
+st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
 /* === HIDE STREAMLIT CHROME === */
 #MainMenu, footer, header { visibility: hidden; }
 .stDeployButton { display: none; }
 [data-testid="stDecoration"] { display: none; }
+
+/* === SIDEBAR TOGGLE BUTTON === */
+[data-testid="collapsedControl"] {
+    background-color: #2962ff !important;
+    border-radius: 0 6px 6px 0 !important;
+    width: 22px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    padding: 12px 0 !important;
+    opacity: 1 !important;
+}
+[data-testid="collapsedControl"] svg {
+    color: white !important;
+    fill: white !important;
+}
 
 /* === SCROLLBAR === */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
