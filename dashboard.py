@@ -665,11 +665,11 @@ if ticker:
                  n = int(sensitivity)
                  for i in range(n, df.shape[0]-n):
                      if show_support and is_support(df, i, n):
-                         l = df['Low'][i]
+                         l = df['Low'].iloc[i]
                          if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
                              levels.append((df.index[i], l, "Support"))
                      elif show_resistance and is_resistance(df, i, n):
-                         l = df['High'][i]
+                         l = df['High'].iloc[i]
                          if np.sum([abs(l - x[1]) < (current_price*0.02) for x in levels]) == 0:
                              levels.append((df.index[i], l, "Resistance"))
                  for date, level, kind in levels:
