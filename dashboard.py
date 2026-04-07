@@ -266,26 +266,37 @@ def run_ai_analysis():
 def go_back():
     st.session_state.show_ai = False
 
-@st.cache_data
+@st.cache_data(ttl=86400)
 def get_all_stock_symbols():
+    import io
+    all_symbols = []
+
+    # 1. Try nselib (works locally)
     try:
         from nselib import capital_market
-        # 1. Get Official List
         nse_df = capital_market.equity_list()
-        all_symbols = nse_df['SYMBOL'].tolist()
+        all_symbols = nse_df['SYMBOL'].dropna().tolist()
     except:
-        all_symbols = []
+        pass
 
-    # 2. MANUALLY ADD Missing/New Stocks (The Fix for Zomato)
-    # Add any other missing tickers here
-    missing_stocks = ["ZOMATO", "PAYTM", "JIOFIN", "SWIGGY", "LICI"] 
-    
-    for stock in missing_stocks:
+    # 2. If nselib failed, fetch directly from NSE's public equity list CSV
+    if len(all_symbols) < 100:
+        try:
+            url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                nse_df = pd.read_csv(io.StringIO(r.text))
+                all_symbols = nse_df['SYMBOL'].dropna().tolist()
+        except:
+            pass
+
+    # 3. Ensure new-age stocks not yet in NSE list are included
+    for stock in ["ZOMATO", "PAYTM", "JIOFIN", "SWIGGY", "LICI"]:
         if stock not in all_symbols:
             all_symbols.append(stock)
-            
-    # 3. Sort list for easy searching
-    return sorted(all_symbols)
+
+    return sorted(set(all_symbols))
 
 # --- HOW TO USE IN SIDEBAR ---
 # stock_list = get_all_stock_symbols()
