@@ -269,32 +269,124 @@ def go_back():
 @st.cache_data(ttl=86400)
 def get_all_stock_symbols():
     import io
-    all_symbols = []
 
-    # 1. Try nselib (works locally)
+    # Bundled fallback — Nifty 50 + Next 50 + Midcap 150 + popular extras
+    # Covers ~500 major NSE stocks; always works with no API dependency
+    BUNDLED = [
+        # Nifty 50
+        "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK",
+        "BAJAJ-AUTO","BAJFINANCE","BAJAJFINSV","BPCL","BHARTIARTL",
+        "BRITANNIA","CIPLA","COALINDIA","DIVISLAB","DRREDDY",
+        "EICHERMOT","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE",
+        "HEROMOTOCO","HINDALCO","HINDUNILVR","ICICIBANK","ITC",
+        "INDUSINDBK","INFY","JSWSTEEL","KOTAKBANK","LT",
+        "M&M","MARUTI","NESTLEIND","NTPC","ONGC",
+        "POWERGRID","RELIANCE","SBILIFE","SBIN","SUNPHARMA",
+        "TATACONSUM","TATAMOTORS","TATASTEEL","TCS","TECHM",
+        "TITAN","ULTRACEMCO","UPL","WIPRO","SHRIRAMFIN",
+        # Nifty Next 50
+        "ABB","AMBUJACEM","DMART","BAJAJHLDNG","BANKBARODA",
+        "BIOCON","BOSCHLTD","CANBK","CHOLAFIN","COLPAL",
+        "DABUR","DLF","GAIL","GODREJCP","GODREJPROP",
+        "HAL","HAVELLS","HINDPETRO","ICICIGI","ICICIPRULI",
+        "INDHOTEL","INDUSTOWER","IRFC","JIOFIN","LICI",
+        "LTIM","LUPIN","NHPC","NMDC","NYKAA",
+        "OFSS","PIIND","PNB","RECLTD","SAIL",
+        "SIEMENS","TATAPOWER","TORNTPHARM","TRENT","UNIONBANK",
+        "VBL","VEDL","VOLTAS","ZYDUSLIFE","ZOMATO",
+        # New-age
+        "PAYTM","SWIGGY","DELHIVERY","POLICYBZR","MAPMYINDIA",
+        # Nifty Midcap 150 & popular midcaps
+        "AUROPHARMA","BALKRISIND","BANDHANBNK","BERGEPAINT","CESC",
+        "CONCOR","COROMANDEL","CROMPTON","CUMMINSIND","DEEPAKNTR",
+        "DIXON","ESCORTS","EXIDEIND","FEDERALBNK","FORTIS",
+        "GMRINFRA","GNFC","GODREJIND","GRANULES","GRINDWELL",
+        "GSPL","GUJARATGAS","HDFCAMC","IBREALEST","IDBI",
+        "IDFCFIRSTB","IGL","INDIGO","INDIANB","INDIAMART",
+        "IOB","IOC","IRCTC","IEX","JKCEMENT",
+        "JUBLFOOD","KAJARIACER","KALPATPOWR","KANSAINER","KEI",
+        "KPIL","LALPATHLAB","LTTS","MANAPPURAM","MARICO",
+        "METROPOLIS","MFSL","MPHASIS","MUTHOOTFIN","NAVINFLUOR",
+        "NAUKRI","NBCC","NCC","OBEROIRLTY","PAGEIND",
+        "PEL","PERSISTENT","PETRONET","PHOENIXLTD","PIDILITIND",
+        "POLYCAB","PRESTIGE","RAMCOCEM","RAYMOND","RBLBANK",
+        "TATAELXSI","TATACHEM","TORNTPOWER","TRIDENT","UBL",
+        "WHIRLPOOL","ZEEL","ADANIGAS","ADANIGREEN","ADANIPOWER",
+        "ADANITRANS","ALKEM","APARINDS","ATUL","APLAPOLLO",
+        "BATAINDIA","BEL","BHEL","BSOFT","CANFINHOME",
+        "CASTROLIND","CEATLTD","CENTURYTEX","CHAMBLFERT","CREDITACC",
+        "DEEPAKFERT","DHANUKA","EMAMILTD","ENDURANCE","FINEORG",
+        "FLUOROCHEM","GICRE","GILLETTE","GLAXO","GODFRYPHLP",
+        "HFCL","HONAUT","IBULHSGFIN","INDIACEM","JKPAPER",
+        "JKTYRE","JSL","JSPL","KFINTECH","KSB",
+        "LINDEINDIA","LUXIND","MAHINDCIE","NATCOPHARM","NIACL",
+        "NLCINDIA","PAISALO","PCBL","PFIZER","RAIN",
+        "RITES","SCI","SRF","SJVN","SOBHA",
+        "SOLARINDS","SPANDANA","TTML","UCOBANK","UTIAMC",
+        "WABCOINDIA","WELCORP","ROUTE","STAR","SAPPHIRE",
+        # Banks & NBFCs
+        "AUBANK","DCBBANK","KTKBANK","LAKSHVILAS","UJJIVAN",
+        "UJJIVANSFB","SURYODAY","EQUITASBNK","ESAFSFB",
+        # PSUs
+        "RVNL","IREDA","HUDCO","RAILVIKAS","BEML",
+        "ENGINERSIN","MAZDOCK","COCHINSHIP","GRSE","BDL",
+        # Pharma
+        "SUNPHARMA","DRREDDY","CIPLA","DIVISLAB","BIOCON",
+        "ALKEM","TORNTPHARM","AUROPHARMA","LUPIN","PFIZER",
+        "IPCALAB","AJANTPHARM","NATCOPHARM","GRANULES","SEQUENT",
+        # IT
+        "TCS","INFY","WIPRO","HCLTECH","TECHM",
+        "LTIM","MPHASIS","LTTS","PERSISTENT","OFSS",
+        "TATAELXSI","COFORGE","MASTEK","HEXAWARE","KPITTECH",
+        # Auto
+        "MARUTI","TATAMOTORS","M&M","BAJAJ-AUTO","HEROMOTOCO",
+        "EICHERMOT","TVSMOTORS","ASHOKLEY","ESCORTS","MOTHERSON",
+        "BOSCHLTD","BHARATFORG","MINDAIND","TIINDIA","APOLLOTYRE",
+        # Cement
+        "ULTRACEMCO","GRASIM","AMBUJACEM","ACC","RAMCOCEM",
+        "JKCEMENT","DALMIACEM","HEIDELBERG","BIRLACORPN","JKLAKSHMI",
+        # Real Estate
+        "DLF","GODREJPROP","OBEROIRLTY","PRESTIGE","PHOENIXLTD",
+        "SOBHA","BRIGADE","MAHLIFE","IBREALEST","SUNTECK",
+        # Energy
+        "RELIANCE","ONGC","BPCL","HINDPETRO","IOC",
+        "GAIL","PETRONET","IGL","GSPL","GUJARATGAS",
+        "ADANIGREEN","ADANIPOWER","TATAPOWER","NTPC","NHPC",
+        "SJVN","CESC","TORNTPOWER","JSWENERGY","GREENKO",
+        # Metal & Mining
+        "TATASTEEL","JSWSTEEL","HINDALCO","COALINDIA","NMDC",
+        "VEDL","SAIL","JSPL","NATIONALUM","MOIL",
+        # Telecom
+        "BHARTIARTL","INDUSTOWER","TTML","HFCL",
+        # Consumer
+        "HINDUNILVR","ITC","BRITANNIA","NESTLEIND","DABUR",
+        "MARICO","COLPAL","GODREJCP","EMAMILTD","JUBLLFOOD",
+        "TATACONSUM","UBL","VBL","RADICO","MCDOWELL-N",
+    ]
+
+    all_symbols = list(set(BUNDLED))
+
+    # Try nselib to supplement (works locally, might work on cloud)
     try:
         from nselib import capital_market
         nse_df = capital_market.equity_list()
-        all_symbols = nse_df['SYMBOL'].dropna().tolist()
+        api_symbols = nse_df['SYMBOL'].dropna().tolist()
+        all_symbols = list(set(all_symbols + api_symbols))
     except:
         pass
 
-    # 2. If nselib failed, fetch directly from NSE's public equity list CSV
-    if len(all_symbols) < 100:
+    # Try NSE CSV archive as second supplement
+    if len(all_symbols) < 200:
         try:
-            url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            r = requests.get(url, headers=headers, timeout=10)
+            r = requests.get(
+                "https://archives.nseindia.com/content/equities/EQUITY_L.csv",
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=10
+            )
             if r.status_code == 200:
                 nse_df = pd.read_csv(io.StringIO(r.text))
-                all_symbols = nse_df['SYMBOL'].dropna().tolist()
+                all_symbols = list(set(all_symbols + nse_df['SYMBOL'].dropna().tolist()))
         except:
             pass
-
-    # 3. Ensure new-age stocks not yet in NSE list are included
-    for stock in ["ZOMATO", "PAYTM", "JIOFIN", "SWIGGY", "LICI"]:
-        if stock not in all_symbols:
-            all_symbols.append(stock)
 
     return sorted(set(all_symbols))
 
