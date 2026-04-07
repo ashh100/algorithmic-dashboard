@@ -209,12 +209,12 @@ def calculate_optimal_sensitivity(df):
         levels = []
         for i in range(n, df.shape[0]-n):
             if is_support(df, i, n):
-                l = df['Low'][i]
+                l = df['Low'].iloc[i]
                 if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
                     levels.append(l)
                     level_count += 1
             elif is_resistance(df, i, n):
-                l = df['High'][i]
+                l = df['High'].iloc[i]
                 if np.sum([abs(l - x) < (current_price*0.02) for x in levels]) == 0:
                     levels.append(l)
                     level_count += 1
