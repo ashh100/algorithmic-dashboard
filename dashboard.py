@@ -28,32 +28,216 @@ def get_nse_fundamentals(ticker):
     return data_engine.get_nse_fundamentals(ticker)
 # 1. Page Setup
 st.set_page_config(layout="wide", page_title="Ashwath's Pro Terminal")
-# --- CUSTOM CSS FOR METRIC CARDS ---
 st.markdown("""
 <style>
-/* Style the metric boxes */
-div[data-testid="metric-container"] {
+/* === HIDE STREAMLIT CHROME === */
+#MainMenu, footer, header { visibility: hidden; }
+.stDeployButton { display: none; }
+[data-testid="stDecoration"] { display: none; }
+
+/* === SCROLLBAR === */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #0b0e14; }
+::-webkit-scrollbar-thumb { background: #1e2533; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #2962ff; }
+
+/* === SIDEBAR === */
+[data-testid="stSidebar"] {
+    background-color: #0d1117 !important;
+    border-right: 1px solid #1e2533 !important;
+}
+[data-testid="stSidebar"] label {
+    font-size: 10px !important;
+    letter-spacing: 1.5px !important;
+    text-transform: uppercase !important;
+    color: #6b7280 !important;
+}
+
+/* === TABS === */
+.stTabs [data-baseweb="tab-list"] {
+    background-color: #0d1117;
+    border-bottom: 1px solid #1e2533;
+    gap: 0px;
+    padding: 0;
+}
+.stTabs [data-baseweb="tab"] {
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #6b7280;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    border-radius: 0;
+    transition: all 0.15s;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #f8f9fa;
     background-color: #151a23;
-    border: 1px solid #2962ff; /* Deep blue border */
-    padding: 10px 15px;
-    border-radius: 8px;
-    box-shadow: 0 0 10px rgba(41, 98, 255, 0.2); /* Slight blue glow */
-    transition: transform 0.2s;
+}
+.stTabs [aria-selected="true"] {
+    background-color: transparent !important;
+    border-bottom: 2px solid #00e676 !important;
+    color: #00e676 !important;
 }
 
-/* Add a subtle hover effect */
+/* === METRIC CARDS === */
+div[data-testid="metric-container"] {
+    background-color: #0d1117;
+    border: 1px solid #1e2533;
+    border-top: 2px solid #2962ff;
+    padding: 14px 18px;
+    border-radius: 3px;
+    transition: border-top-color 0.2s;
+    box-shadow: none;
+}
 div[data-testid="metric-container"]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 0 15px rgba(0, 230, 118, 0.4); /* Glows green on hover */
-    border: 1px solid #00e676;
+    border-top-color: #00e676;
+    transform: none;
+    box-shadow: none;
+}
+div[data-testid="metric-container"] [data-testid="stMetricLabel"] p {
+    font-size: 9px !important;
+    letter-spacing: 2.5px !important;
+    text-transform: uppercase !important;
+    color: #6b7280 !important;
+}
+div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-size: 20px !important;
+    font-weight: 600 !important;
+    color: #f8f9fa !important;
 }
 
-/* Hide the Streamlit main menu hamburger and watermark for a cleaner look */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
+/* === BUTTONS === */
+.stButton > button {
+    background: transparent;
+    border: 1px solid #1e2533;
+    color: #9ca3af;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-radius: 2px;
+    padding: 8px 20px;
+    transition: all 0.15s;
+    width: 100%;
+}
+.stButton > button:hover {
+    border-color: #2962ff;
+    color: #f8f9fa;
+    background: rgba(41,98,255,0.08);
+}
+[data-testid="stButton"] button[kind="primary"] {
+    background: #2962ff;
+    border-color: #2962ff;
+    color: white;
+}
+
+/* === INPUTS === */
+.stTextInput input, .stNumberInput input {
+    background-color: #0d1117 !important;
+    border: 1px solid #1e2533 !important;
+    border-radius: 2px !important;
+    color: #f8f9fa !important;
+    font-size: 12px !important;
+}
+.stTextInput input:focus, .stNumberInput input:focus {
+    border-color: #2962ff !important;
+    box-shadow: none !important;
+}
+.stSelectbox > div > div {
+    background-color: #0d1117 !important;
+    border: 1px solid #1e2533 !important;
+    border-radius: 2px !important;
+}
+
+/* === EXPANDER === */
+details summary {
+    font-size: 11px !important;
+    letter-spacing: 1px !important;
+    color: #9ca3af !important;
+}
+
+/* === DIVIDER === */
+hr { border-color: #1e2533 !important; }
+
+/* === HEADER === */
+.terminal-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #1e2533;
+    margin-bottom: 22px;
+}
+.terminal-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 5px;
+    color: #f8f9fa;
+    text-transform: uppercase;
+}
+.terminal-title span { color: #00e676; }
+.terminal-badge {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: #00e676;
+    border: 1px solid #00e676;
+    padding: 2px 8px;
+    border-radius: 2px;
+    margin-left: 14px;
+    vertical-align: middle;
+    opacity: 0.8;
+}
+.terminal-meta {
+    font-size: 10px;
+    color: #374151;
+    letter-spacing: 1px;
+}
+.sidebar-brand {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #00e676;
+    text-transform: uppercase;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #1e2533;
+    margin-bottom: 4px;
+}
+.section-label {
+    font-size: 9px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #374151;
+    border-left: 2px solid #2962ff;
+    padding-left: 8px;
+    margin: 16px 0 10px 0;
+}
+.ai-card {
+    background: #0d1117;
+    border: 1px solid #1e2533;
+    border-left: 3px solid #2962ff;
+    padding: 20px 24px;
+    border-radius: 3px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #d1d5db;
+    white-space: pre-wrap;
+}
 </style>
 """, unsafe_allow_html=True)
-st.title("Algorithmic Dashboard")
+
+import datetime
+now = datetime.datetime.now().strftime("%d %b %Y · %H:%M")
+st.markdown(f"""
+<div class="terminal-header">
+    <div>
+        <span class="terminal-title">Market <span>Terminal</span></span>
+        <span class="terminal-badge">LIVE</span>
+    </div>
+    <div class="terminal-meta">NSE · BSE &nbsp;|&nbsp; {now}</div>
+</div>
+""", unsafe_allow_html=True)
 
 # --- SESSION STATE SETUP ---
 if 'show_ai' not in st.session_state:
@@ -438,7 +622,7 @@ def get_stock_data(ticker, period):
     return df, fundamentals
 
 # --- SIDEBAR & CONTROLS ---
-st.sidebar.header("Controls")
+st.sidebar.markdown('<div class="sidebar-brand">⬡ &nbsp;Terminal</div>', unsafe_allow_html=True)
 
 search_key = f"sidebar_search_{st.session_state.search_key_trigger}"
 search_query = st.sidebar.text_input("Search Company", key=search_key)
@@ -460,8 +644,7 @@ else:
 period = st.sidebar.selectbox("Time Period", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
 if ticker:
-    st.sidebar.markdown("---")
-    st.sidebar.subheader(f"📍 {ticker}") 
+    st.sidebar.markdown(f'<div class="section-label">Selected · {ticker}</div>', unsafe_allow_html=True) 
     
     # 1. Fetch info using the NEW NSE helper (Ensure you have renamed/updated your function)
     info = get_nse_fundamentals(ticker)
@@ -512,8 +695,7 @@ if ticker:
 else:
     st.sidebar.warning("Select a company to see fundamentals.")
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("📂 My Portfolio")
+st.sidebar.markdown('<div class="section-label">Portfolio</div>', unsafe_allow_html=True)
 
 # 1. Form to Add Stock
 with st.sidebar.expander("Add Stock to Portfolio"):
@@ -545,12 +727,10 @@ if not portfolio_df.empty:
         st.rerun()
 else:
     st.sidebar.info("Portfolio is empty.")
-st.sidebar.markdown("---")
-st.sidebar.subheader("Chart Display")
+st.sidebar.markdown('<div class="section-label">Chart Display</div>', unsafe_allow_html=True)
 chart_type = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line", "Area", "OHLC"])
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("🤖 AI Analyst")
+st.sidebar.markdown('<div class="section-label">AI Analyst</div>', unsafe_allow_html=True)
 st.sidebar.button("Generate Report", on_click=run_ai_analysis)
 
 # --- MAIN DASHBOARD LOGIC ---
@@ -599,7 +779,8 @@ if ticker:
             with st.spinner(f"Reading news & analyzing charts for {ticker}..."):
                 news_headlines = get_stock_news(ticker)
                 analysis = get_ai_analysis(ticker, df, news_headlines)
-                st.info(f"**AI Analysis:**\n\n{analysis}")
+                st.markdown(f'<div class="section-label">AI Analyst · {ticker}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="ai-card">{analysis}</div>', unsafe_allow_html=True)
                 
                 with st.expander("📰 Read the News Headlines Used by AI"):
                     if not news_headlines:
